@@ -1,0 +1,47 @@
+{
+  "nombre": "minimo",
+  "descripcion": "Escenario mínimo: dos usuarios, una aplicación con su service principal, un grupo de seguridad y una membresía. Equivalente al escenario inicial que estaba hardcodeado en creacion_automatica.ps1.",
+  "usuarios": [
+    {
+      "displayName": "Pepito SL",
+      "upn": "pepito.sl@{tenant}",
+      "mailNickname": "pepito.sl",
+      "password": "UserAccess!123",
+      "department": "Ventas",
+      "jobTitle": "Comercial"
+    },
+    {
+      "displayName": "Jose Juan Valdero",
+      "upn": "jose.juan.valdero@{tenant}",
+      "mailNickname": "jose.juan.valdero",
+      "password": "AdminP@ssw0rd#2025!",
+      "department": "Administracion IT",
+      "jobTitle": "Administrador de Sistemas"
+    }
+  ],
+  "grupos": [
+    {
+      "displayName": "Departamento de Ventas",
+      "description": "Usuarios del departamento de ventas",
+      "mailNickname": "departamento-ventas"
+    }
+  ],
+  "aplicaciones": [
+    {
+      "displayName": "Panel de Analisis Comercial",
+      "description": "Panel interno de analisis y reportes comerciales",
+      "signInAudience": "AzureADMyOrg",
+      "redirectUris": [
+        "https://panel-analisis.empresa.local/callback"
+      ]
+    }
+  ],
+  "relaciones": [
+    {
+      "tipo": "membresia",
+      "usuario": "pepito.sl@{tenant}",
+      "grupo": "Departamento de Ventas"
+    }
+  ],
+  "vulnerabilidad": "sp_owner"
+}

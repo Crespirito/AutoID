@@ -1,0 +1,11 @@
+{
+  "nombre": "pim_eligible",
+  "descripcion": "Asigna un rol de directorio privilegiado como elegible (PIM) a un usuario de bajo privilegio. El usuario puede activarlo temporalmente sin ser permanente.",
+  "tipo": "PimEligibleRole",
+  "parametros": {
+    "usuario": "pepito.sl@{tenant}",
+    "rol": "Global Administrator",
+    "duracion": "PT8H"
+  },
+  "requiereLicencia": "P2"
+}

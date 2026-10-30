@@ -1,0 +1,10 @@
+{
+  "nombre": "group_owner",
+  "descripcion": "Asigna un usuario de bajo privilegio como propietario de un grupo. El owner de un grupo puede añadir miembros, incluidos grupos privilegiados, y escalar privilegios.",
+  "tipo": "GroupOwner",
+  "parametros": {
+    "usuario": "pepito.sl@{tenant}",
+    "grupo": "Departamento de Ventas"
+  },
+  "requiereLicencia": "Free"
+}

@@ -1,0 +1,10 @@
+﻿{
+    "nombre":  "escenarioej1_sp_owner",
+    "descripcion":  "Owner de SP para el escenario 1.",
+    "tipo":  "ServicePrincipalOwner",
+    "parametros":  {
+                       "usuario":  "jorge.l@{tenant}",
+                       "aplicacion":  "Panel de Analisis Comercial"
+                   },
+    "requiereLicencia":  "Free"
+}

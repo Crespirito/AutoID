@@ -1,0 +1,10 @@
+﻿{
+    "nombre":  "escenarioej2_sp_owner",
+    "descripcion":  "Owner de SP para el escenario 2.",
+    "tipo":  "ServicePrincipalOwner",
+    "parametros":  {
+                       "usuario":  "marta.a@{tenant}",
+                       "aplicacion":  "Portal de RRHH"
+                   },
+    "requiereLicencia":  "Free"
+}
