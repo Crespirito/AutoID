@@ -5,12 +5,16 @@
     Gestiona la sesión de Microsoft Graph (persistente hasta salir con 0),
     la configuración y el manifiesto, y delega la creación/limpieza en
     los scripts hijos:
-      - creacion_automatica.ps1
-      - creacion_personalizada.ps1
+      - creauto.ps1
+      - creamanual.ps1
       - clean_up.ps1
+
+    La conexión a Graph se realiza al arrancar. Si hay datos de App-Only
+    guardados en la configuración, se usan. Si no, se intenta el flujo
+    interactivo.
 .NOTES
     Requiere que estén presentes en la misma carpeta:
-      lib_ui.ps1, lib_graph.ps1, lib_config.ps1, lib_manifiesto.ps1
+      lib_ui.ps1, lib_config.ps1, lib_graph.ps1, lib_manifiesto.ps1, lib_log.ps1
 #>
 #Requires -Version 5.1
 [CmdletBinding()]
@@ -27,31 +31,31 @@ if (-not $PSScriptRoot) {
 }
 
 # ============================================================
-# CARGA DE LIBRERÍAS
+# CARGA DE LIBRERÍAS (orden importante)
 # ============================================================
 . (Join-Path $PSScriptRoot "lib_ui.ps1")
+. (Join-Path $PSScriptRoot "lib_config.ps1")   # Antes de graph para que Get-LabConfig exista
 . (Join-Path $PSScriptRoot "lib_graph.ps1")
-. (Join-Path $PSScriptRoot "lib_config.ps1")
 . (Join-Path $PSScriptRoot "lib_manifiesto.ps1")
+. (Join-Path $PSScriptRoot "lib_log.ps1")
 
 # ============================================================
 # RUTAS A LOS SCRIPTS HIJOS
 # ============================================================
-$ScriptAuto    = Join-Path $PSScriptRoot "creacion_automatica.ps1"
-$ScriptManual  = Join-Path $PSScriptRoot "creacion_personalizada.ps1"
+$ScriptAuto    = Join-Path $PSScriptRoot "creauto.ps1"
+$ScriptManual  = Join-Path $PSScriptRoot "creamanual.ps1"
 $ScriptCleanup = Join-Path $PSScriptRoot "clean_up.ps1"
 
 # ============================================================
 # ESTADO DEL MENÚ
 # ============================================================
-$config = Get-LabConfig
+$script:config = Get-LabConfig
 
 # ============================================================
 # FUNCIONES AUXILIARES
 # ============================================================
 
 function Invoke-EnsureSession {
-    # Garantiza sesión antes de una operación. Si expiró, intenta reconectar.
     if (Test-LabGraphSession) { return $true }
     Write-LabWarn "No hay sesión de Graph activa. Conectando..."
     return (Connect-LabGraph)
@@ -98,28 +102,133 @@ function Invoke-ScriptHijo {
 
 function Invoke-GestionSesion {
     Show-LabHeader -Titulo "GESTION DE SESION DE GRAPH"
+    
     $status = Get-LabGraphStatus
+    $config = Get-LabConfig
 
     if ($status) {
         Write-LabOk "Sesión activa."
         Write-Host "  Usuario : $($status.Account)"
         Write-Host "  Tenant  : $($status.TenantId)"
         Write-Host "  Scopes  : $($status.Scopes)"
-        Write-Host ""
-        $resp = Read-Host "¿Quieres reconectar (cerrar y abrir sesión)? (SI/N)"
-        if ($resp -eq "SI") {
-            Disconnect-LabGraph
-            $null = Connect-LabGraph
-        }
     } else {
         Write-LabWarn "No hay sesión activa."
-        $null = Connect-LabGraph
     }
-    Wait-LabKey
+    Write-Host ""
+
+    # --- Opciones de gestión ---
+    Write-Host "  [1] Reconectar (cerrar y abrir sesión)"
+    Write-Host "  [2] Introducir datos App-Only (Certificado)"
+    Write-Host "  [V] Volver al menú principal"
+    Write-Host ""
+
+    $op = Read-Host "Selecciona una opción"
+
+    switch ($op.ToUpper()) {
+        "1" {
+            $null = Connect-LabGraph -Forzar
+            Wait-LabKey
+        }
+        "2" {
+            Write-Host ""
+            Write-Host "Introduce los datos de la App-Only (deja en blanco para borrar):" -ForegroundColor Yellow
+            
+            $newClientId = Read-Host "  Client ID [$($config.AppOnlyClientId)]"
+            if ([string]::IsNullOrWhiteSpace($newClientId)) { $newClientId = $null }
+            
+            $newTenantId = Read-Host "  Tenant ID [$($config.AppOnlyTenantId)]"
+            if ([string]::IsNullOrWhiteSpace($newTenantId)) { $newTenantId = $null }
+            
+            $newThumbprint = Read-Host "  Thumbprint [$($config.AppOnlyThumbprint)]"
+            if ([string]::IsNullOrWhiteSpace($newThumbprint)) { $newThumbprint = $null }
+            
+            $newCertName = Read-Host "  Nombre del certificado (opcional) [$($config.AppOnlyCertName)]"
+            if ([string]::IsNullOrWhiteSpace($newCertName)) { $newCertName = $null }
+
+            $config.AppOnlyClientId   = $newClientId
+            $config.AppOnlyTenantId   = $newTenantId
+            $config.AppOnlyThumbprint = $newThumbprint
+            $config.AppOnlyCertName   = $newCertName
+            
+            $null = Save-LabConfig -Config $config
+            Write-LabOk "Datos App-Only guardados en menu_config.json."
+            Wait-LabKey
+        }
+        default {
+            # "V" o cualquier otra tecla vuelve al menú
+        }
+    }
+}
+
+function Invoke-GestionModulosGraph {
+    while ($true) {
+        Show-LabHeader -Titulo "GESTION DE MODULOS DE GRAPH"
+        
+        $infoModulos = Get-LabGraphModulosInfo
+        Write-Host "Estado de los módulos:" -ForegroundColor Cyan
+        
+        for ($i = 0; $i -lt $infoModulos.Count; $i++) {
+            $m = $infoModulos[$i]
+            $estado = ""
+            if ($m.Cargado)       { $estado = "[CARGADO]" -ForegroundColor Green }
+            elseif ($m.Instalado) { $estado = "[INSTALADO]" -ForegroundColor Yellow }
+            else                  { $estado = "[NO INSTALADO]" -ForegroundColor DarkGray }
+            
+            Write-Host ("  [{0}] {1,-45} {2}" -f ($i + 1), $m.Descripcion, $estado)
+        }
+        
+        Write-Host ""
+        Write-Host "  [I] Instalar TODOS los de la lista"
+        Write-Host "  [C] Cargar TODOS los instalados"
+        Write-Host "  [V] Volver al menu principal"
+        Write-Host ""
+        
+        $opcion = Read-Host "Selecciona un módulo para instalar/cargar, o una opción"
+        
+        if ($opcion.ToUpper() -eq "V") { return }
+        
+        if ($opcion.ToUpper() -eq "I") {
+            $todos = $script:LabGraphCatalogo.Keys
+            $null = Install-LabGraphModules -Modulos $todos
+            $null = Import-LabGraphModules -Modulos $todos
+            Write-LabOk "Todos los módulos preparados."
+            Wait-LabKey
+            continue
+        }
+
+        if ($opcion.ToUpper() -eq "C") {
+            $instalados = ($infoModulos | Where-Object { $_.Instalado }).Nombre
+            $null = Import-LabGraphModules -Modulos $instalados
+            Write-LabOk "Módulos instalados cargados en memoria."
+            Wait-LabKey
+            continue
+        }
+        
+        if ($opcion -match '^\d+$') {
+            $idx = [int]$opcion - 1
+            if ($idx -ge 0 -and $idx -lt $infoModulos.Count) {
+                $modElegido = $infoModulos[$idx]
+                Write-Host ""
+                Write-Host "Has seleccionado: $($modElegido.Nombre)" -ForegroundColor Yellow
+                
+                $null = Install-LabGraphModules -Modulos @($modElegido.Nombre)
+                $null = Import-LabGraphModules -Modulos @($modElegido.Nombre)
+                
+                Write-LabOk "Módulo preparado: $($modElegido.Nombre)"
+                Wait-LabKey
+            } else {
+                Write-LabWarn "Número fuera de rango."
+                Start-Sleep -Seconds 1
+            }
+        } else {
+            Write-LabWarn "Opción no válida."
+            Start-Sleep -Seconds 1
+        }
+    }
 }
 
 function Invoke-CrearAutomatica {
-    if (-not (Test-ScriptHijo -Path $ScriptAuto -Nombre "creacion_automatica.ps1")) {
+    if (-not (Test-ScriptHijo -Path $ScriptAuto -Nombre "creauto.ps1")) {
         Wait-LabKey; return
     }
     if (-not (Invoke-EnsureSession)) { Wait-LabKey; return }
@@ -135,14 +244,14 @@ function Invoke-CrearAutomatica {
     }
 
     $argumentos = @{}
-    if ($config.Verbose) { $argumentos["Verbose"] = $true }
+    if ($script:config.Verbose) { $argumentos["Verbose"] = $true }
 
     Invoke-ScriptHijo -Path $ScriptAuto -Argumentos $argumentos
     Wait-LabKey
 }
 
 function Invoke-CrearPersonalizada {
-    if (-not (Test-ScriptHijo -Path $ScriptManual -Nombre "creacion_personalizada.ps1")) {
+    if (-not (Test-ScriptHijo -Path $ScriptManual -Nombre "creamanual.ps1")) {
         Wait-LabKey; return
     }
     if (-not (Invoke-EnsureSession)) { Wait-LabKey; return }
@@ -158,7 +267,7 @@ function Invoke-CrearPersonalizada {
     }
 
     $argumentos = @{}
-    if ($config.Verbose) { $argumentos["Verbose"] = $true }
+    if ($script:config.Verbose) { $argumentos["Verbose"] = $true }
 
     Invoke-ScriptHijo -Path $ScriptManual -Argumentos $argumentos
     Wait-LabKey
@@ -176,9 +285,9 @@ function Invoke-Limpiar {
     }
 
     $argumentos = @{ ManifiestoPath = (Get-LabManifiestoPath) }
-    if ($config.Verbose) { $argumentos["Verbose"] = $true }
-
+    if ($script:config.Verbose) { $argumentos["Verbose"] = $true }
     Invoke-ScriptHijo -Path $ScriptCleanup -Argumentos $argumentos
+
     Wait-LabKey
 }
 
@@ -236,8 +345,8 @@ function Invoke-VerManifiesto {
 }
 
 function Invoke-ToggleVerbose {
-    $script:config.Verbose = -not $config.Verbose
-    Save-LabConfig -Config $script:config
+    $script:config.Verbose = -not $script:config.Verbose
+    $null = Save-LabConfig -Config $script:config
     Write-LabOk "Modo Verbose: $($script:config.Verbose)"
     Start-Sleep -Seconds 1
 }
@@ -286,12 +395,20 @@ function Show-EstadoSesion {
     } else {
         Write-Host "  Sin sesion activa" -ForegroundColor Red
     }
+    
+    # Mostrar si hay datos App-Only configurados
+    $config = Get-LabConfig
+    if ($config.AppOnlyClientId) {
+        Write-Host "  App-Only  : Configurado (Client ID: $($config.AppOnlyClientId))" -ForegroundColor DarkGray
+    } else {
+        Write-Host "  App-Only  : No configurado" -ForegroundColor DarkGray
+    }
     Write-Host ""
 }
 
 function Show-EstadoConfig {
     Write-Host "--- Configuracion ---" -ForegroundColor Yellow
-    Write-Host "  Verbose   : $($config.Verbose)"
+    Write-Host "  Verbose   : $($script:config.Verbose)"
     Write-Host ""
 }
 
@@ -318,7 +435,7 @@ Show-LabHeader -Titulo "GESTOR DE ENTORNOS DE LABORATORIO - ENTRA ID (FREE)"
 Write-LabInfo "Iniciando sesión de Microsoft Graph..."
 if (-not (Connect-LabGraph)) {
     Write-LabError "No se pudo establecer la sesión inicial."
-    Write-LabWarn "El menú arrancará sin sesión. Usa la opción [C] para conectar manualmente."
+    Write-LabWarn "El menú arrancará sin sesión. Usa la opción [C] para configurar o conectar manualmente."
     Wait-LabKey
 }
 
@@ -343,6 +460,7 @@ while ($true) {
     Write-Host ""
     Write-Host "--- Sesion / Configuracion ---" -ForegroundColor Cyan
     Write-Host "  [C] Gestionar sesion de Graph"
+    Write-Host "  [M] Gestionar modulos de Graph"
     Write-Host "  [V] Alternar Verbose"
     Write-Host "  [R] Resetear configuracion"
     Write-Host "  [I] Info sobre tenant Free"
@@ -358,11 +476,12 @@ while ($true) {
         "3" { Invoke-Limpiar }
         "4" { Invoke-VerManifiesto }
         "C" { Invoke-GestionSesion }
+        "M" { Invoke-GestionModulosGraph }
         "V" { Invoke-ToggleVerbose }
         "R" { Invoke-ResetConfig }
         "I" { Invoke-InfoLicencia }
         "0" {
-            Save-LabConfig -Config $config
+            $null = Save-LabConfig -Config $script:config
             Disconnect-LabGraph
             Write-Host ""
             Write-LabOk "Sesión cerrada. Saliendo..."

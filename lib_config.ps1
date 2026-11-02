@@ -6,13 +6,15 @@
       - Ruta canónica de menu_config.json
       - Valores por defecto
       - Carga con validación de tipos
-      - Guardado
+      - Guardado (con relleno de claves ausentes)
       - Reseteo
-      - Actualización parcial de claves
+      - Actualización parcial
 .NOTES
     Depende de lib_ui.ps1 (funciones Write-Lab*).
     Se carga por dot-sourcing.
+    Guardar este fichero como UTF-8 con BOM para compatibilidad con PS 5.1.
 #>
+#Requires -Version 5.1
 
 # ============================================================
 # RUTA CANÓNICA
@@ -23,18 +25,14 @@ $script:LabConfigPath     = Join-Path $PSScriptRoot $script:LabConfigFileName
 # ============================================================
 # VALORES POR DEFECTO
 # ============================================================
-# Para añadir una nueva opción persistente:
-#   1. Añadir la clave aquí con su valor por defecto.
-#   2. Añadir su lectura/validación en Get-LabConfig.
-#   3. Añadir su escritura en Save-LabConfig (ya es genérica).
-#   4. Añadir la acción correspondiente en menu.ps1.
 function Get-LabConfigDefaults {
-    <#
-    .SYNOPSIS
-        Devuelve una copia nueva de los valores por defecto.
-    #>
     return @{
-        Verbose = $false
+        Verbose            = $false
+        # --- Datos para autenticación App-Only ---
+        AppOnlyClientId    = $null
+        AppOnlyTenantId    = $null
+        AppOnlyThumbprint  = $null
+        AppOnlyCertName    = $null
     }
 }
 
@@ -43,18 +41,10 @@ function Get-LabConfigDefaults {
 # ============================================================
 
 function Get-LabConfigPath {
-    <#
-    .SYNOPSIS
-        Devuelve la ruta absoluta de menu_config.json.
-    #>
     return $script:LabConfigPath
 }
 
 function Test-LabConfigExists {
-    <#
-    .SYNOPSIS
-        Devuelve $true si existe el fichero de configuración.
-    #>
     return (Test-Path $script:LabConfigPath)
 }
 
@@ -63,11 +53,6 @@ function Get-LabConfig {
     .SYNOPSIS
         Carga la configuración desde disco. Si no existe o es inválida,
         devuelve los valores por defecto.
-    .DESCRIPTION
-        Valida tipos para evitar que un JSON editado a mano con strings
-        ("true"/"false") rompa la lógica booleana del menú.
-    .OUTPUTS
-        Hashtable con las claves de configuración.
     #>
     $defaults = Get-LabConfigDefaults
 
@@ -84,15 +69,25 @@ function Get-LabConfig {
 
     $config = Get-LabConfigDefaults
 
-    # --- Verbose ---
+    # --- Verbose (booleano) ---
     if ($null -ne $loaded.PSObject.Properties['Verbose']) {
         $raw = $loaded.Verbose
         if ($raw -is [bool]) {
             $config.Verbose = $raw
         } elseif ($raw -is [string]) {
             $config.Verbose = ($raw -match '^(?i:true|1|yes|si)$')
-        } elseif ($raw -is [int]) {
+        } elseif ($raw -is [int] -or $raw -is [long] -or $raw -is [double]) {
             $config.Verbose = ($raw -ne 0)
+        }
+    }
+
+    # --- AppOnly (strings) ---
+    foreach ($key in @('AppOnlyClientId', 'AppOnlyTenantId', 'AppOnlyThumbprint', 'AppOnlyCertName')) {
+        if ($null -ne $loaded.PSObject.Properties[$key]) {
+            $val = $loaded.$key
+            if (-not [string]::IsNullOrWhiteSpace($val)) {
+                $config[$key] = $val.ToString().Trim()
+            }
         }
     }
 
@@ -102,11 +97,7 @@ function Get-LabConfig {
 function Save-LabConfig {
     <#
     .SYNOPSIS
-        Guarda la configuración en disco.
-    .PARAMETER Config
-        Hashtable con las claves de configuración.
-    .OUTPUTS
-        $true si se guardó correctamente, $false si falló.
+        Guarda la configuración en disco, rellenando claves ausentes.
     #>
     param(
         [Parameter(Mandatory=$true)]
@@ -114,7 +105,12 @@ function Save-LabConfig {
     )
 
     try {
-        $Config | ConvertTo-Json -Depth 3 | Set-Content -Path $script:LabConfigPath -Encoding UTF8 -Force
+        $completa = Get-LabConfigDefaults
+        foreach ($key in $Config.Keys) {
+            $completa[$key] = $Config[$key]
+        }
+
+        $completa | ConvertTo-Json -Depth 3 | Set-Content -Path $script:LabConfigPath -Encoding UTF8 -Force
         return $true
     } catch {
         Write-LabWarn "No se pudo guardar la configuración: $($_.Exception.Message)"
@@ -123,38 +119,21 @@ function Save-LabConfig {
 }
 
 function Reset-LabConfig {
-    <#
-    .SYNOPSIS
-        Resetea la configuración a los valores por defecto y la guarda.
-    .OUTPUTS
-        Hashtable con los valores por defecto restaurados.
-    #>
     $defaults = Get-LabConfigDefaults
     $null = Save-LabConfig -Config $defaults
     return $defaults
 }
 
 function Update-LabConfig {
-    <#
-    .SYNOPSIS
-        Aplica cambios parciales a la configuración y la guarda.
-    .DESCRIPTION
-        Útil para que el menú modifique una clave sin tener que leer,
-        modificar y guardar manualmente.
-    .PARAMETER Cambios
-        Hashtable con las claves a modificar.
-    .OUTPUTS
-        Hashtable con la configuración resultante.
-    #>
-    param(
-        [Parameter(Mandatory=$true)]
-        [hashtable]$Cambios
-    )
+    param([Parameter(Mandatory=$true)] [hashtable]$Cambios)
 
     $config = Get-LabConfig
     foreach ($key in $Cambios.Keys) {
         $config[$key] = $Cambios[$key]
     }
-    $null = Save-LabConfig -Config $config
+
+    if (-not (Save-LabConfig -Config $config)) {
+        return $null
+    }
     return $config
 }

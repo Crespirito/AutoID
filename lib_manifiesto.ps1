@@ -5,14 +5,17 @@
     Proporciona:
       - Ruta canónica del manifiesto (manifiesto_lab.json)
       - Existencia del manifiesto
-      - Lectura normalizada (arrays garantizados, propiedades por defecto)
+      - Lectura normalizada: arrays garantizados, propiedades por defecto
+        y deduplicación de entradas
       - Estado resumido para mostrar en el menú
-      - Guardado del manifiesto (para los scripts de creación)
-      - Renombrado del manifiesto tras el cleanup
+      - Guardado del manifiesto (para creauto.ps1 y creamanual.ps1)
+      - Renombrado del manifiesto a "procesado" (para clean_up.ps1)
 .NOTES
     Depende de lib_ui.ps1 (funciones Write-Lab*).
     Se carga por dot-sourcing.
+    Guardar este fichero como UTF-8 con BOM para compatibilidad con PS 5.1.
 #>
+#Requires -Version 5.1
 
 # ============================================================
 # RUTA CANÓNICA
@@ -45,10 +48,12 @@ function Get-LabManifiesto {
     .SYNOPSIS
         Lee y normaliza el manifiesto. Devuelve $null si no existe.
     .DESCRIPTION
-        Garantiza que las propiedades Usuarios, Grupos, Aplicaciones,
-        ServicePrincipals y Vulnerabilidades son siempre arrays (incluso si
-        el JSON las omite o las guarda como valor único). Esto permite usar
-        .Count con StrictMode activo sin errores.
+        Garantiza que las propiedades Usuarios, Grupos, Aplicaciones y
+        ServicePrincipals son siempre arrays (incluso si el JSON las
+        omite o las guarda como valor único) y que no contienen
+        duplicados. Esto permite usar .Count con StrictMode activo sin
+        errores y evita que clean_up.ps1 intente borrar dos veces el
+        mismo objeto.
     .PARAMETER Path
         Ruta alternativa del manifiesto. Si se omite, se usa la estándar.
     .OUTPUTS
@@ -63,15 +68,24 @@ function Get-LabManifiesto {
 
     $m = Get-Content -Path $Path -Raw -Encoding UTF8 | ConvertFrom-Json
 
+    # Helper local para leer una propiedad con fallback y deduplicar.
+    $leerColeccion = {
+        param($origen, $nombre)
+        if ($origen.PSObject.Properties[$nombre]) {
+            @($origen.$nombre) | Select-Object -Unique
+        } else {
+            @()
+        }
+    }
+
     return [pscustomobject]@{
         Fecha             = if ($m.PSObject.Properties['Fecha'])             { $m.Fecha }             else { $null }
         TenantId          = if ($m.PSObject.Properties['TenantId'])          { $m.TenantId }          else { $null }
         TenantDomain      = if ($m.PSObject.Properties['TenantDomain'])      { $m.TenantDomain }      else { $null }
-        Usuarios          = @(if ($m.PSObject.Properties['Usuarios'])          { $m.Usuarios }          else { @() })
-        Grupos            = @(if ($m.PSObject.Properties['Grupos'])            { $m.Grupos }            else { @() })
-        Aplicaciones      = @(if ($m.PSObject.Properties['Aplicaciones'])      { $m.Aplicaciones }      else { @() })
-        ServicePrincipals = @(if ($m.PSObject.Properties['ServicePrincipals']) { $m.ServicePrincipals } else { @() })
-        Vulnerabilidades  = @(if ($m.PSObject.Properties['Vulnerabilidades'])  { $m.Vulnerabilidades }  else { @() })
+        Usuarios          = & $leerColeccion $m 'Usuarios'
+        Grupos            = & $leerColeccion $m 'Grupos'
+        Aplicaciones      = & $leerColeccion $m 'Aplicaciones'
+        ServicePrincipals = & $leerColeccion $m 'ServicePrincipals'
     }
 }
 
@@ -107,9 +121,7 @@ function New-LabManifiestoVacio {
         Devuelve la estructura base del manifiesto, lista para rellenar.
     .DESCRIPTION
         Lo usan los scripts de creación para inicializar el manifiesto
-        antes de ir añadiendo objetos. Incluye Vulnerabilidades vacío para
-        que creacion_automatica.ps1 pueda añadir entradas sin comprobar
-        la propiedad cada vez.
+        antes de ir añadiendo objetos.
     .OUTPUTS
         OrderedDictionary con Fecha, TenantId, TenantDomain y arrays vacíos.
     #>
@@ -121,7 +133,6 @@ function New-LabManifiestoVacio {
         Grupos            = @()
         Aplicaciones      = @()
         ServicePrincipals = @()
-        Vulnerabilidades  = @()
     }
 }
 
@@ -146,7 +157,7 @@ function Save-LabManifiesto {
     if (-not $Path) { $Path = $script:LabManifiestoPath }
 
     try {
-        $Manifiesto | ConvertTo-Json -Depth 10 | Set-Content -Path $Path -Encoding UTF8 -Force
+        $Manifiesto | ConvertTo-Json -Depth 5 | Set-Content -Path $Path -Encoding UTF8 -Force
         return $true
     } catch {
         Write-LabWarn "No se pudo guardar el manifiesto: $($_.Exception.Message)"
@@ -158,7 +169,11 @@ function Rename-LabManifiestoProcesado {
     <#
     .SYNOPSIS
         Renombra el manifiesto actual con sufijo _procesado_<timestamp>.
+    .DESCRIPTION
         Lo usa clean_up.ps1 al terminar para evitar reprocesarlo.
+        $script:LabManifiestoPath es una ruta absoluta (Join-Path con
+        $PSScriptRoot), así que Move-Item funciona independientemente
+        del directorio actual.
     .OUTPUTS
         Ruta del nuevo fichero, o $null si no había manifiesto o falló.
     #>
