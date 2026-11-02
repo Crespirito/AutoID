@@ -57,7 +57,6 @@ Los datos se guardan en `menu_config.json` y se usarán automáticamente en el p
 
 ## Uso
 
-```powershell
 .\menu.ps1
 
 
@@ -149,29 +148,29 @@ El certificado App-Only debe guardarse en el almacén de la máquina que ejecuta
 "No hay sesión de Graph activa"
 Los scripts hijos no conectan por su cuenta. Ejecútalos siempre desde menu.ps1 o usa [C] para conectar.
 
-"Manifiesto presente pero ilegible"
+### "Manifiesto presente pero ilegible"
 El fichero manifiesto_lab.json está corrupto (normalmente por interrumpir un script con Ctrl+C). Bórralo y vuelve a empezar:
 
-powershell
+### powershell
 Remove-Item .\manifiesto_lab.json -Force
 "User canceled authentication" sin haber cancelado nada
 Es el fallo de WAM en la versión 2.41 del módulo. Configura App-Only con el certificado ([C]) o baja a la versión 2.33 del módulo Microsoft.Graph.Authentication.
 
-Fallo App-Only: "Certificate not found"
+### Fallo App-Only: "Certificate not found"
 El thumbprint no coincide con ningún certificado del almacén Cert:\CurrentUser\My. Verifica que el certificado está instalado y que el thumbprint es correcto.
 
-powershell
+### powershell
 Get-ChildItem Cert:\CurrentUser\My | Select-Object Thumbprint, Subject
 Errores 403 / "Insufficient privileges"
 La App-Only no tiene los permisos de aplicación necesarios o falta el consentimiento de administrador. Revisa los permisos en el portal de Entra ID.
 
-"Fallo tras 3 intentos" al limpiar
+### "Fallo tras 3 intentos" al limpiar
 Graph devolvió 404 transitorio o el objeto tiene dependencias que no se pudieron romper. Vuelve a ejecutar [3]; el manifiesto se conserva si hubo errores.
 
-Los logs se acumulan
+### Los logs se acumulan
 Cada ejecución genera un log_*.csv. Bórralos periódicamente:
 
-powershell
+### powershell
 Remove-Item log_*.csv
 Encoding roto en mensajes ("l�nea", acentos raros)
 Algún .ps1 se guardó sin BOM. Vuelve a guardarlo como UTF-8 con BOM.
