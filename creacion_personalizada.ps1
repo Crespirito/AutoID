@@ -428,6 +428,9 @@ while (-not $salirConstruccion) {
     Write-Host ""
 
     $op = Read-Host "Selecciona una opcion"
+    # Normalizar: Read-Host puede devolver $null en algunos hosts y
+    # .ToUpper() lanzaría NullReferenceException con StrictMode.
+    $op = if ($null -eq $op) { "" } else { $op.Trim() }
 
     switch ($op.ToUpper()) {
         "1" { $null = New-UsuarioInteractivo -TenantDomain $TenantDomain }

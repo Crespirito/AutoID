@@ -49,6 +49,10 @@ function Get-LabManifiesto {
         ServicePrincipals y Vulnerabilidades son siempre arrays (incluso si
         el JSON las omite o las guarda como valor único). Esto permite usar
         .Count con StrictMode activo sin errores.
+
+        También garantiza que un valor $null en el JSON se convierte en array
+        vacío: @($null) devuelve un array de UN elemento ($null), no un array
+        vacío, lo que rompería .Count y foreach en los consumidores.
     .PARAMETER Path
         Ruta alternativa del manifiesto. Si se omite, se usa la estándar.
     .OUTPUTS
@@ -63,15 +67,17 @@ function Get-LabManifiesto {
 
     $m = Get-Content -Path $Path -Raw -Encoding UTF8 | ConvertFrom-Json
 
+    if ($null -eq $m) { return $null }
+
     return [pscustomobject]@{
         Fecha             = if ($m.PSObject.Properties['Fecha'])             { $m.Fecha }             else { $null }
         TenantId          = if ($m.PSObject.Properties['TenantId'])          { $m.TenantId }          else { $null }
         TenantDomain      = if ($m.PSObject.Properties['TenantDomain'])      { $m.TenantDomain }      else { $null }
-        Usuarios          = @(if ($m.PSObject.Properties['Usuarios'])          { $m.Usuarios }          else { @() })
-        Grupos            = @(if ($m.PSObject.Properties['Grupos'])            { $m.Grupos }            else { @() })
-        Aplicaciones      = @(if ($m.PSObject.Properties['Aplicaciones'])      { $m.Aplicaciones }      else { @() })
-        ServicePrincipals = @(if ($m.PSObject.Properties['ServicePrincipals']) { $m.ServicePrincipals } else { @() })
-        Vulnerabilidades  = @(if ($m.PSObject.Properties['Vulnerabilidades'])  { $m.Vulnerabilidades }  else { @() })
+        Usuarios          = @(if ($m.PSObject.Properties['Usuarios']          -and $null -ne $m.Usuarios)          { $m.Usuarios }          else { @() })
+        Grupos            = @(if ($m.PSObject.Properties['Grupos']            -and $null -ne $m.Grupos)            { $m.Grupos }            else { @() })
+        Aplicaciones      = @(if ($m.PSObject.Properties['Aplicaciones']      -and $null -ne $m.Aplicaciones)      { $m.Aplicaciones }      else { @() })
+        ServicePrincipals = @(if ($m.PSObject.Properties['ServicePrincipals'] -and $null -ne $m.ServicePrincipals) { $m.ServicePrincipals } else { @() })
+        Vulnerabilidades  = @(if ($m.PSObject.Properties['Vulnerabilidades']  -and $null -ne $m.Vulnerabilidades)  { $m.Vulnerabilidades }  else { @() })
     }
 }
 
@@ -88,6 +94,7 @@ function Get-LabManifiestoStatus {
 
     try {
         $m = Get-LabManifiesto -Path $script:LabManifiestoPath
+        if ($null -eq $m) { return "ilegible" }
         return [pscustomobject]@{
             Fecha    = $m.Fecha
             Tenant   = $m.TenantDomain

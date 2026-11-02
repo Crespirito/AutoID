@@ -82,6 +82,12 @@ function Get-LabConfig {
         return $defaults
     }
 
+    # ConvertFrom-Json puede devolver $null si el fichero contiene "null".
+    # Acceder a $loaded.PSObject con StrictMode lanzaría.
+    if ($null -eq $loaded) {
+        return $defaults
+    }
+
     $config = Get-LabConfigDefaults
 
     # --- Verbose ---

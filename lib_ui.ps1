@@ -67,7 +67,15 @@ function Show-LabHeader {
 
     Clear-LabScreen
     Write-Host "============================================================" -ForegroundColor Cyan
-    Write-Host ("    " + $Titulo).PadRight(60) -ForegroundColor Cyan
+
+    # Truncar el título si excede el ancho del marco (60 caracteres).
+    # PadRight solo rellena; no recorta, así que un título largo rompería el marco.
+    $linea = "    " + $Titulo
+    if ($linea.Length -gt 60) {
+        $linea = $linea.Substring(0, 57) + "..."
+    }
+    Write-Host $linea.PadRight(60) -ForegroundColor Cyan
+
     Write-Host "============================================================" -ForegroundColor Cyan
     Write-Host ""
 }

@@ -483,6 +483,9 @@ foreach ($u in $def.Usuarios) {
         -Department        $u.department `
         -JobTitle          $u.jobTitle
     $usuariosCreados[$u.upn] = $user
+    # Clave adicional con el UPN ya resuelto, para que las vulnerabilidades
+    # puedan referenciarlo tanto con placeholder como sin él.
+    if ($upn -ne $u.upn) { $usuariosCreados[$upn] = $user }
 }
 
 # ============================================================
@@ -558,10 +561,9 @@ if ($vulnDef) {
             Tipo      = $vulnDef.Tipo
             Resultado = $resultado
         }
-        if (-not $manifiesto.Contains('Vulnerabilidades')) {
-            $manifiesto['Vulnerabilidades'] = @()
-        }
-        $manifiesto['Vulnerabilidades'] += [pscustomobject]@{
+        # New-LabManifiestoVacio ya crea la clave 'Vulnerabilidades' como array
+        # vacío, así que no hace falta comprobar su existencia.
+        $manifiesto.Vulnerabilidades += [pscustomobject]@{
             nombre           = $vulnDef.Nombre
             tipo             = $vulnDef.Tipo
             parametros       = $vulnDef.Parametros
@@ -616,9 +618,7 @@ Write-Host "  Usuarios     : $($manifiesto.Usuarios.Count)"
 Write-Host "  Grupos       : $($manifiesto.Grupos.Count)"
 Write-Host "  Aplicaciones : $($manifiesto.Aplicaciones.Count)"
 Write-Host "  SPs          : $($manifiesto.ServicePrincipals.Count)"
-if ($manifiesto.Contains('Vulnerabilidades')) {
-    Write-Host "  Vulnerabilidades aplicadas: $($manifiesto.Vulnerabilidades.Count)"
-}
+Write-Host "  Vulnerabilidades aplicadas: $($manifiesto.Vulnerabilidades.Count)"
 Write-Host ""
 
 if ($manifiesto.Usuarios.Count -gt 0) {
@@ -661,3 +661,8 @@ Write-Host "Errores:         $errores" -ForegroundColor Red
 Write-Host "Log completo:    $logPath" -ForegroundColor Gray
 Write-Host "Manifiesto:      $manifiestoPath" -ForegroundColor Gray
 Write-Host ""
+
+# Propagar el fallo al orquestador: menu.ps1 comprueba $LASTEXITCODE.
+if (-not $SetupSuccessful) {
+    exit 1
+}

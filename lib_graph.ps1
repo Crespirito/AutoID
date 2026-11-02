@@ -3,7 +3,7 @@
     Librería de gestión de sesión de Microsoft Graph.
 .DESCRIPTION
     Proporciona:
-      - Instalación del módulo Microsoft.Graph si no está presente
+      - Instalación de los módulos de Microsoft Graph necesarios si no están presentes
       - Conexión delegada con scopes para tenant Free + mecanismos P1/P2
       - Verificación de sesión activa
       - Estado de la sesión actual
@@ -18,10 +18,10 @@
     - AdministrativeUnit.ReadWrite.All: Crear y gestionar Administrative Units.
       Son el mecanismo de Entra ID más cercano a las OUs de AD on-prem.
       Permite agrupar usuarios/grupos y asignar administradores con alcance limitado.
-      Crear la AU es posible en Free; asignar roles scoped requiere P1 [citation:1][citation:5].
+      Crear la AU es posible en Free; asignar roles scoped requiere P1.
     - RoleManagement.ReadWrite.Directory: Gestionar PIM (roles elegibles).
       Permite crear asignaciones elegibles, que modelan los privilegios
-      acumulados y no permanentes típicos de REDIL [citation:6][citation:22].
+      acumulados y no permanentes típicos de REDIL.
 #>
 
 # ============================================================
@@ -44,6 +44,21 @@ $script:LabGraphScopesExtended = @(
 
 # Scopes activos por defecto: Free + Extended
 $script:LabGraphScopes = $script:LabGraphScopesFree + $script:LabGraphScopesExtended
+
+# ============================================================
+# MÓDULOS NECESARIOS
+# ============================================================
+# Solo se instalan/importan los submódulos realmente usados por el
+# proyecto. Instalar el meta-módulo Microsoft.Graph completo descarga
+# ~40 submódulos y puede tardar varios minutos.
+$script:LabGraphModules = @(
+    "Microsoft.Graph.Authentication",
+    "Microsoft.Graph.Applications",
+    "Microsoft.Graph.Users",
+    "Microsoft.Graph.Groups",
+    "Microsoft.Graph.Identity.DirectoryManagement",
+    "Microsoft.Graph.Identity.Governance"
+)
 
 # ============================================================
 # FUNCIONES PÚBLICAS
@@ -98,22 +113,36 @@ function Get-LabGraphStatus {
 function Install-LabGraphModule {
     <#
     .SYNOPSIS
-        Instala el módulo Microsoft.Graph si no está disponible.
+        Instala los submódulos de Microsoft.Graph necesarios si no están disponibles.
+    .DESCRIPTION
+        Comprueba cada submódulo de $script:LabGraphModules y lo instala
+        individualmente si falta. Esto es mucho más rápido que instalar el
+        meta-módulo Microsoft.Graph completo.
     #>
-    if (Get-Module -ListAvailable -Name Microsoft.Graph.Authentication -ErrorAction SilentlyContinue) {
+    $faltantes = @()
+    foreach ($m in $script:LabGraphModules) {
+        if (-not (Get-Module -ListAvailable -Name $m -ErrorAction SilentlyContinue)) {
+            $faltantes += $m
+        }
+    }
+
+    if ($faltantes.Count -eq 0) {
         return $true
     }
 
-    Write-LabWarn "Módulo Microsoft.Graph no encontrado. Instalando desde PSGallery (puede tardar)..."
-
-    try {
-        Install-Module -Name Microsoft.Graph -Scope CurrentUser -Repository PSGallery -Force -ErrorAction Stop
-        Write-LabOk "Módulo Microsoft.Graph instalado."
-        return $true
-    } catch {
-        Write-LabError "No se pudo instalar Microsoft.Graph: $($_.Exception.Message)"
-        return $false
+    Write-LabWarn "Faltan módulos de Microsoft.Graph. Instalando desde PSGallery (puede tardar)..."
+    foreach ($m in $faltantes) {
+        try {
+            Write-LabInfo "Instalando $m..."
+            Install-Module -Name $m -Scope CurrentUser -Repository PSGallery -Force -ErrorAction Stop
+        } catch {
+            Write-LabError "No se pudo instalar ${m}: $($_.Exception.Message)"
+            return $false
+        }
     }
+
+    Write-LabOk "Módulos de Microsoft.Graph instalados."
+    return $true
 }
 
 function Connect-LabGraph {
@@ -138,7 +167,7 @@ function Connect-LabGraph {
         return $true
     }
 
-    # Asegurar módulo
+    # Asegurar módulos
     if (-not (Install-LabGraphModule)) {
         return $false
     }

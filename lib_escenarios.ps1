@@ -102,6 +102,10 @@ function Get-LabEscenario {
         throw "El escenario '$Nombre' no es un JSON válido: $($_.Exception.Message)"
     }
 
+    if ($null -eq $raw) {
+        throw "El escenario '$Nombre' es un JSON nulo."
+    }
+
     # Validación mínima
     if (-not $raw.PSObject.Properties['usuarios'] -and -not $raw.PSObject.Properties['Usuarios']) {
         throw "El escenario '$Nombre' no declara 'usuarios'."
@@ -166,11 +170,20 @@ function Get-LabVulnerabilidad {
         throw "La vulnerabilidad '$Nombre' no es un JSON válido: $($_.Exception.Message)"
     }
 
+    if ($null -eq $raw) {
+        throw "La vulnerabilidad '$Nombre' es un JSON nulo."
+    }
+
     if (-not $raw.PSObject.Properties['tipo']) {
         throw "La vulnerabilidad '$Nombre' no declara 'tipo'."
     }
     if (-not $raw.PSObject.Properties['parametros']) {
         throw "La vulnerabilidad '$Nombre' no declara 'parametros'."
+    }
+
+    $tipo = $raw.tipo
+    if ([string]::IsNullOrWhiteSpace([string]$tipo)) {
+        throw "La vulnerabilidad '$Nombre' declara 'tipo' vacío."
     }
 
     $requiereLicencia = $null
@@ -182,7 +195,7 @@ function Get-LabVulnerabilidad {
     return [pscustomobject]@{
         Nombre           = $Nombre
         Descripcion      = $descripcion
-        Tipo             = $raw.tipo
+        Tipo             = $tipo
         Parametros       = $raw.parametros
         RequiereLicencia = $requiereLicencia
     }
