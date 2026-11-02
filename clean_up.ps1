@@ -88,6 +88,10 @@ if (-not (Test-Path $ManifiestoPath)) {
 
 try {
     $manifiesto = Get-LabManifiesto -Path $ManifiestoPath
+    if ($null -eq $manifiesto) {
+        Add-LogEntry -Categoria "Error" -Mensaje "El manifiesto está vacío o es nulo." -Detalle $ManifiestoPath
+        exit 1
+    }
     Add-LogEntry -Categoria "Info" -Mensaje "Manifiesto cargado correctamente." -Detalle @{
         Fecha    = $manifiesto.Fecha
         Tenant   = $manifiesto.TenantDomain
@@ -104,6 +108,9 @@ try {
 # ============================================================
 # FASE 2: RESUMEN Y CONFIRMACIÓN
 # ============================================================
+# Get-LabManifiesto normaliza Vulnerabilidades a array siempre.
+$vulns = $manifiesto.Vulnerabilidades
+
 Write-Host ""
 Write-Host "--- Contenido del manifiesto ---" -ForegroundColor Yellow
 Write-Host "  Fecha del manifiesto : $($manifiesto.Fecha)"
@@ -112,12 +119,6 @@ Write-Host "  Usuarios             : $($manifiesto.Usuarios.Count)"
 Write-Host "  Grupos               : $($manifiesto.Grupos.Count)"
 Write-Host "  Aplicaciones         : $($manifiesto.Aplicaciones.Count)"
 Write-Host "  Service Principals   : $($manifiesto.ServicePrincipals.Count)"
-
-# Vulnerabilidades: puede no existir la propiedad si el manifiesto es de una versión anterior
-$vulns = @()
-if ($manifiesto.PSObject.Properties['Vulnerabilidades']) {
-    $vulns = @($manifiesto.Vulnerabilidades)
-}
 Write-Host "  Vulnerabilidades     : $($vulns.Count)"
 Write-Host ""
 
@@ -176,26 +177,19 @@ if ($vulns.Count -gt 0) {
                         }
                     }
                 }
-                
-}
-
-"PimEligibleRole" {
-    foreach ($o in $afectados) {
-        try {
-            $requests = Get-MgRoleManagementDirectoryRoleEligibilityScheduleRequest `
-                -Filter "principalId eq '$($o.principalId)'" -All -ErrorAction Stop
-
-            foreach ($r in @($requests)) {
-                Remove-MgRoleManagementDirectoryRoleEligibilityScheduleRequest `
-                    -UnifiedRoleEligibilityScheduleRequestId $r.Id `
-                    -Confirm:$false -ErrorAction Stop
-            }
-            Add-LogEntry -Categoria "Info" -Mensaje "Rol PIM revertido." -Detalle $o
-        } catch {
-            Add-LogEntry -Categoria "Warning" -Mensaje "No se pudo revertir rol PIM." -Detalle @{ Objeto = $o; Error = $_.Exception.Message }
-        }
-    }
-}
+                "PimEligibleRole" {
+                    foreach ($o in $afectados) {
+                        # La reversión de PIM requiere buscar las schedules del
+                        # principal y cancelarlas una a una. Remove-... solo
+                        # acepta el ID de la schedule (no BodyParameter).
+                        try {
+                            $schedules = Get-MgRoleManagementDirectoryRoleEligibilitySchedule `
+                                -Filter "principalId eq '$($o.principalId)'" -All -ErrorAction Stop
+                            foreach ($s in $schedules) {
+                                Remove-MgRoleManagementDirectoryRoleEligibilityScheduleRequest `
+                                    -UnifiedRoleEligibilityScheduleRequestId $s.Id `
+                                    -Confirm:$false -ErrorAction Stop
+                            }
                             Add-LogEntry -Categoria "Info" -Mensaje "Rol PIM revertido." -Detalle $o
                         } catch {
                             Add-LogEntry -Categoria "Warning" -Mensaje "No se pudo revertir rol PIM." -Detalle @{ Objeto = $o; Error = $_.Exception.Message }
@@ -345,22 +339,22 @@ foreach ($upn in $manifiesto.Usuarios) {
 # ============================================================
 # FASE 7: RENOMBRAR EL MANIFIESTO COMO PROCESADO
 # ============================================================
-try {
-    $esEstandar = ($ManifiestoPath -eq (Get-LabManifiestoPath))
-    if ($esEstandar) {
+# Solo se renombra el manifiesto estándar. Si el usuario pasó -ManifiestoPath
+# con una ruta alternativa, se respeta y no se toca.
+$esEstandar = ($ManifiestoPath -eq (Get-LabManifiestoPath))
+if ($esEstandar) {
+    try {
         $manifiestoProcesado = Rename-LabManifiestoProcesado
         if ($manifiestoProcesado) {
             Add-LogEntry -Categoria "Info" -Mensaje "Manifiesto renombrado como procesado." -Detalle $manifiestoProcesado
         } else {
             Add-LogEntry -Categoria "Warning" -Mensaje "No se pudo renombrar el manifiesto estándar."
         }
-    } else {
-        $manifiestoProcesado = $ManifiestoPath -replace '\.json$', "_procesado_$(Get-Date -Format 'yyyyMMdd_HHmmss').json"
-        Move-Item -Path $ManifiestoPath -Destination $manifiestoProcesado -Force
-        Add-LogEntry -Categoria "Info" -Mensaje "Manifiesto renombrado como procesado." -Detalle $manifiestoProcesado
+    } catch {
+        Add-LogEntry -Categoria "Warning" -Mensaje "No se pudo renombrar el manifiesto." -Detalle $_.Exception.Message
     }
-} catch {
-    Add-LogEntry -Categoria "Warning" -Mensaje "No se pudo renombrar el manifiesto." -Detalle $_.Exception.Message
+} else {
+    Add-LogEntry -Categoria "Info" -Mensaje "Manifiesto alternativo: no se renombra." -Detalle $ManifiestoPath
 }
 
 # ============================================================
@@ -386,3 +380,8 @@ Write-Host "Errores:         $errores" -ForegroundColor Red
 Write-Host "Log completo:    $logPath" -ForegroundColor Gray
 Write-Host ""
 Write-LabOk "Limpieza completada."
+
+# Propagar el fallo al orquestador: menu.ps1 comprueba $LASTEXITCODE.
+if ($errores -gt 0) {
+    exit 1
+}

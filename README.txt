@@ -15,7 +15,7 @@ administrarlas.
 .-Roles personalizados. P1.
 Free permite "gestionar usuarios y grupos", mientras que P1 añade 
 grupos dinámicos y P2 añade PIM.
-
+-Creación automaática no crea AU ni asigna roles PIM
 
 Revisión de la versión:
 Ahora se añade la creación de escenarios automaticos con más de ellos.

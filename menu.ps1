@@ -44,7 +44,10 @@ $ScriptCleanup = Join-Path $PSScriptRoot "clean_up.ps1"
 # ============================================================
 # ESTADO DEL MENÚ
 # ============================================================
-$config = Get-LabConfig
+# Se usa $script:config para que las funciones que modifican la
+# configuración (Invoke-ToggleVerbose, Invoke-ResetConfig) alteren
+# la MISMA variable y los cambios persistan durante la sesión.
+$script:config = Get-LabConfig
 
 # ============================================================
 # FUNCIONES AUXILIARES
@@ -76,7 +79,11 @@ function Invoke-ScriptHijo {
     Write-Host "Ejecutando: $(Split-Path $Path -Leaf)" -ForegroundColor Green
     Write-Host "------------------------------------------------------------" -ForegroundColor Gray
 
+    # Resetear $LASTEXITCODE antes de la llamada: si el script hijo no
+    # hace `exit`, $LASTEXITCODE conservaría un valor de una ejecución
+    # nativa anterior y produciría falsos positivos/negativos.
     $exitCode = 0
+    $global:LASTEXITCODE = 0
     try {
         & $Path @Argumentos
         if ($null -ne $LASTEXITCODE) { $exitCode = $LASTEXITCODE }
@@ -135,7 +142,7 @@ function Invoke-CrearAutomatica {
     }
 
     $argumentos = @{}
-    if ($config.Verbose) { $argumentos["Verbose"] = $true }
+    if ($script:config.Verbose) { $argumentos["Verbose"] = $true }
 
     Invoke-ScriptHijo -Path $ScriptAuto -Argumentos $argumentos
     Wait-LabKey
@@ -158,7 +165,7 @@ function Invoke-CrearPersonalizada {
     }
 
     $argumentos = @{}
-    if ($config.Verbose) { $argumentos["Verbose"] = $true }
+    if ($script:config.Verbose) { $argumentos["Verbose"] = $true }
 
     Invoke-ScriptHijo -Path $ScriptManual -Argumentos $argumentos
     Wait-LabKey
@@ -176,7 +183,7 @@ function Invoke-Limpiar {
     }
 
     $argumentos = @{ ManifiestoPath = (Get-LabManifiestoPath) }
-    if ($config.Verbose) { $argumentos["Verbose"] = $true }
+    if ($script:config.Verbose) { $argumentos["Verbose"] = $true }
 
     Invoke-ScriptHijo -Path $ScriptCleanup -Argumentos $argumentos
     Wait-LabKey
@@ -236,8 +243,8 @@ function Invoke-VerManifiesto {
 }
 
 function Invoke-ToggleVerbose {
-    $script:config.Verbose = -not $config.Verbose
-    Save-LabConfig -Config $script:config
+    $script:config.Verbose = -not $script:config.Verbose
+    $null = Save-LabConfig -Config $script:config
     Write-LabOk "Modo Verbose: $($script:config.Verbose)"
     Start-Sleep -Seconds 1
 }
@@ -291,7 +298,7 @@ function Show-EstadoSesion {
 
 function Show-EstadoConfig {
     Write-Host "--- Configuracion ---" -ForegroundColor Yellow
-    Write-Host "  Verbose   : $($config.Verbose)"
+    Write-Host "  Verbose   : $($script:config.Verbose)"
     Write-Host ""
 }
 
@@ -351,6 +358,9 @@ while ($true) {
     Write-Host ""
 
     $opcion = Read-Host "Selecciona una opcion"
+    # Normalizar: Read-Host puede devolver $null en algunos hosts y
+    # .ToUpper() lanzaría NullReferenceException con StrictMode.
+    $opcion = if ($null -eq $opcion) { "" } else { $opcion.Trim() }
 
     switch ($opcion.ToUpper()) {
         "1" { Invoke-CrearAutomatica }
@@ -362,7 +372,7 @@ while ($true) {
         "R" { Invoke-ResetConfig }
         "I" { Invoke-InfoLicencia }
         "0" {
-            Save-LabConfig -Config $config
+            $null = Save-LabConfig -Config $script:config
             Disconnect-LabGraph
             Write-Host ""
             Write-LabOk "Sesión cerrada. Saliendo..."
