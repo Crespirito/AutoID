@@ -7,11 +7,16 @@
       - Pausa con fallback
       - Cabecera y banner
       - Wrappers de color para mensajes (Info, Ok, Warn, Error)
-      - Confirmación explícita por "SI"
+      - Confirmación explícita por teclado ('SI')
+
+    Es la base del resto de librerías del laboratorio: lib_graph.ps1,
+    lib_config.ps1, lib_manifiesto.ps1 y lib_log.ps1 asumen que estas
+    funciones existen.
 .NOTES
     Sin dependencias. Se carga por dot-sourcing.
-    El resto de librerías y scripts asumen que estas funciones existen.
+    Guardar este fichero como UTF-8 con BOM para compatibilidad con PS 5.1.
 #>
+#Requires -Version 5.1
 
 # ============================================================
 # PANTALLA
