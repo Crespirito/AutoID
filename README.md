@@ -67,7 +67,7 @@ password = HMAC-SHA256(semilla, upn) → Base64 → 16 chars + "!Aa1"
 
 
 
-Propiedades del modelo:
+### Propiedades del modelo:
 
 - **Determinista:** misma semilla + mismo UPN → misma contraseña.
 - **Única por usuario:** cada UPN produce una contraseña distinta.
@@ -107,7 +107,7 @@ usar la conexión `-SoloFree` desde `[C] Gestionar sesión de Graph`.
 Al arrancar se conecta a Graph (flujo interactivo) y muestra el estado
 actual (sesión, configuración, manifiesto pendiente). Desde el menú:
 
-Creación
+### Creación
 [1] Creación automática (creauto.ps1) — escoge un escenario de
 escenarios/escenario/, muestra un resumen, pide confirmación y crea los
 objetos. Soporta -DryRun para simular sin tocar el tenant.
@@ -115,13 +115,13 @@ objetos. Soporta -DryRun para simular sin tocar el tenant.
 [2] Creación manual (creamanual.ps1) — añade usuarios, grupos,
 apps y relaciones de forma interactiva.
 
-Limpieza y manifiesto
+### Limpieza y manifiesto
 [3] Limpiar entorno (clean_up.ps1) — borra los objetos del
 manifiesto en orden seguro.
 
 [4] Ver manifiesto — inspecciona qué hay pendiente de limpiar.
 
-Sesión y configuración
+### Sesión y configuración
 [C] Gestionar sesión de Graph — ver estado, reconectar.
 
 [V] Alternar Verbose — más detalle en la salida.
@@ -132,7 +132,7 @@ Sesión y configuración
 
 [0] Salir — guarda configuración y cierra sesión.
 
-Flujo típico
+### Flujo típico
 Ejecutar .\menu.ps1. Aceptar el flujo interactivo de Graph.
 
 (Opcional) Ejecutar .\generar_biblioteca.ps1 para crear los escenarios
@@ -149,7 +149,7 @@ Opción [3] para limpiar todo lo creado.
 
 Opción [0] para salir.
 
-Orden de borrado
+### Orden de borrado
 clean_up.ps1 elimina en este orden para romper dependencias:
 
 Vulnerabilidades aplicadas (owners de SP, owners de grupo,
@@ -168,8 +168,8 @@ Usuarios.
 Al terminar, el manifiesto se renombra con sufijo
 _procesado_<timestamp> para evitar reprocesarlo.
 
-Limitaciones (tenant Free)
-Disponible
+## Limitaciones (tenant Free)
+### Disponible
 Usuarios, grupos de seguridad, aplicaciones y service principals.
 
 Membresías de grupo.
@@ -180,7 +180,7 @@ Owners de grupo.
 
 Credenciales en aplicaciones (client secrets).
 
-No disponible (requiere P1/P2)
+### No disponible (requiere P1/P2)
 Asignación de roles de directorio.
 
 Grupos con asignación de roles.
@@ -196,7 +196,7 @@ implementados, pero fallarán en un tenant Free. Están pensados para
 tenants con P2.
 
 
-Notas de seguridad
+# Notas de seguridad
 No hay contraseñas en los JSON. Se derivan de la semilla local de
 cada escenario. Conserva escenarios/.secrets/ fuera de Git.
 
@@ -217,7 +217,7 @@ regenerar todas las contraseñas de ese escenario.
 No uses este laboratorio en un tenant de producción. Está diseñado
 para entornos aislados de prácticas.
 
-Solución de problemas
+# Solución de problemas
 "No hay sesión de Graph activa"
 Los scripts hijos no conectan por su cuenta. Ejecútalos siempre desde
 menu.ps1 o usa [C] para conectar.
