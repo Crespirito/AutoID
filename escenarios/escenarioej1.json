@@ -1,0 +1,67 @@
+{
+  "nombre": "escenarioej1",
+  "descripcion": "Escenario de ejemplo 1: 3 usuarios, 2 grupos, 1 aplicacion.",
+  "usuarios": [
+    {
+      "displayName": "Lucia Garcia",
+      "upn": "lucia.g@{tenant}",
+      "mailNickname": "lucia.g",
+      "department": "Ventas",
+      "jobTitle": "Comercial"
+    },
+    {
+      "displayName": "Javier Martinez",
+      "upn": "javier.m@{tenant}",
+      "mailNickname": "javier.m",
+      "department": "IT",
+      "jobTitle": "Administrador de Sistemas"
+    },
+    {
+      "displayName": "Maria Lopez",
+      "upn": "maria.l@{tenant}",
+      "mailNickname": "maria.l",
+      "department": "RRHH",
+      "jobTitle": "Tecnico de RRHH"
+    }
+  ],
+  "grupos": [
+    {
+      "displayName": "Departamento de Ventas",
+      "description": "Usuarios del departamento de Ventas",
+      "mailNickname": "departamento-ventas"
+    },
+    {
+      "displayName": "Departamento de IT",
+      "description": "Usuarios del departamento de IT",
+      "mailNickname": "departamento-it"
+    }
+  ],
+  "aplicaciones": [
+    {
+      "displayName": "Panel de Analisis Comercial",
+      "description": "Aplicacion interna: Panel de Analisis Comercial",
+      "signInAudience": "AzureADMyOrg",
+      "redirectUris": [
+        "https://paneldeanalisiscomercial.empresa.local/callback"
+      ]
+    }
+  ],
+  "relaciones": [
+    {
+      "tipo": "membresia",
+      "usuario": "lucia.g@{tenant}",
+      "grupo": "Departamento de Ventas"
+    },
+    {
+      "tipo": "membresia",
+      "usuario": "javier.m@{tenant}",
+      "grupo": "Departamento de IT"
+    },
+    {
+      "tipo": "membresia",
+      "usuario": "maria.l@{tenant}",
+      "grupo": "Departamento de Ventas"
+    }
+  ],
+  "vulnerabilidad": "escenarioej1_sp_owner"
+}

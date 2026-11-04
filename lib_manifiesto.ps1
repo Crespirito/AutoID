@@ -12,12 +12,18 @@
 .NOTES
     Depende de lib_ui.ps1 (funciones Write-Lab*).
     Se carga por dot-sourcing.
+
+    SEGURIDAD:
+    El manifiesto NO contiene contraseñas. Solo guarda UPNs y nombres de
+    objetos creados, para que clean_up.ps1 pueda revertirlos. Las
+    contraseñas se derivan de la semilla local del escenario y nunca
+    se persisten aquí.
 #>
 
 # ============================================================
 # RUTA CANÓNICA
 # ============================================================
-$script:LabManifiestoFileName = "manifiesto_lab.json"
+$script:LabManifiestoFileName = 'manifiesto_lab.json'
 $script:LabManifiestoPath     = Join-Path $PSScriptRoot $script:LabManifiestoFileName
 
 # ============================================================
@@ -37,7 +43,7 @@ function Test-LabManifiestoExists {
     .SYNOPSIS
         Devuelve $true si existe el manifiesto estándar.
     #>
-    return (Test-Path $script:LabManifiestoPath)
+    return (Test-Path -Path $script:LabManifiestoPath)
 }
 
 function Get-LabManifiesto {
@@ -59,7 +65,7 @@ function Get-LabManifiesto {
     )
 
     if (-not $Path) { $Path = $script:LabManifiestoPath }
-    if (-not (Test-Path $Path)) { return $null }
+    if (-not (Test-Path -Path $Path)) { return $null }
 
     $m = Get-Content -Path $Path -Raw -Encoding UTF8 | ConvertFrom-Json
 
@@ -81,7 +87,7 @@ function Get-LabManifiestoStatus {
         Devuelve un resumen del manifiesto para mostrar en el menú.
     .OUTPUTS
         $null               si no existe manifiesto
-        "ilegible"          si existe pero no se puede leer
+        'ilegible'          si existe pero no se puede leer
         PSCustomObject      con Fecha, Tenant, Usuarios, Grupos, Apps, SPs
     #>
     if (-not (Test-LabManifiestoExists)) { return $null }
@@ -97,7 +103,7 @@ function Get-LabManifiestoStatus {
             SPs      = $m.ServicePrincipals.Count
         }
     } catch {
-        return "ilegible"
+        return 'ilegible'
     }
 }
 
@@ -108,13 +114,13 @@ function New-LabManifiestoVacio {
     .DESCRIPTION
         Lo usan los scripts de creación para inicializar el manifiesto
         antes de ir añadiendo objetos. Incluye Vulnerabilidades vacío para
-        que creacion_automatica.ps1 pueda añadir entradas sin comprobar
-        la propiedad cada vez.
+        que creauto.ps1 pueda añadir entradas sin comprobar la propiedad
+        cada vez.
     .OUTPUTS
         OrderedDictionary con Fecha, TenantId, TenantDomain y arrays vacíos.
     #>
     return [ordered]@{
-        Fecha             = (Get-Date).ToString("yyyy-MM-ddTHH:mm:ss")
+        Fecha             = (Get-Date).ToString('yyyy-MM-ddTHH:mm:ss')
         TenantId          = $null
         TenantDomain      = $null
         Usuarios          = @()
@@ -137,7 +143,7 @@ function Save-LabManifiesto {
         $true si se guardó correctamente, $false si falló.
     #>
     param(
-        [Parameter(Mandatory=$true)]
+        [Parameter(Mandatory = $true)]
         [object]$Manifiesto,
 
         [string]$Path = $null
@@ -158,6 +164,7 @@ function Rename-LabManifiestoProcesado {
     <#
     .SYNOPSIS
         Renombra el manifiesto actual con sufijo _procesado_<timestamp>.
+    .DESCRIPTION
         Lo usa clean_up.ps1 al terminar para evitar reprocesarlo.
     .OUTPUTS
         Ruta del nuevo fichero, o $null si no había manifiesto o falló.
@@ -166,7 +173,7 @@ function Rename-LabManifiestoProcesado {
 
     try {
         $nuevoPath = $script:LabManifiestoPath -replace '\.json$', "_procesado_$(Get-Date -Format 'yyyyMMdd_HHmmss').json"
-        Move-Item -Path $script:LabManifiestoPath -Destination $nuevoPath -Force -ErrorAction Stop
+        $null = Move-Item -Path $script:LabManifiestoPath -Destination $nuevoPath -Force -ErrorAction Stop
         return $nuevoPath
     } catch {
         Write-LabWarn "No se pudo renombrar el manifiesto: $($_.Exception.Message)"

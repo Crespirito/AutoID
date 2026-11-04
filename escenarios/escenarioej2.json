@@ -1,0 +1,104 @@
+{
+  "nombre": "escenarioej2",
+  "descripcion": "Escenario de ejemplo 2: 5 usuarios, 3 grupos, 2 aplicaciones.",
+  "usuarios": [
+    {
+      "displayName": "Carlos Sanchez",
+      "upn": "carlos.s@{tenant}",
+      "mailNickname": "carlos.s",
+      "department": "Finanzas",
+      "jobTitle": "Analista Financiero"
+    },
+    {
+      "displayName": "Elena Perez",
+      "upn": "elena.p@{tenant}",
+      "mailNickname": "elena.p",
+      "department": "Produccion",
+      "jobTitle": "Operario"
+    },
+    {
+      "displayName": "Pablo Gomez",
+      "upn": "pablo.g@{tenant}",
+      "mailNickname": "pablo.g",
+      "department": "Almacen",
+      "jobTitle": "Responsable de Almacen"
+    },
+    {
+      "displayName": "Sara Fernandez",
+      "upn": "sara.f@{tenant}",
+      "mailNickname": "sara.f",
+      "department": "Calidad",
+      "jobTitle": "Tecnico de Calidad"
+    },
+    {
+      "displayName": "Alberto Ruiz",
+      "upn": "alberto.r@{tenant}",
+      "mailNickname": "alberto.r",
+      "department": "Compras",
+      "jobTitle": "Comprador"
+    }
+  ],
+  "grupos": [
+    {
+      "displayName": "Departamento de Finanzas",
+      "description": "Usuarios del departamento de Finanzas",
+      "mailNickname": "departamento-finanzas"
+    },
+    {
+      "displayName": "Departamento de Produccion",
+      "description": "Usuarios del departamento de Produccion",
+      "mailNickname": "departamento-produccion"
+    },
+    {
+      "displayName": "Departamento de Almacen",
+      "description": "Usuarios del departamento de Almacen",
+      "mailNickname": "departamento-almacen"
+    }
+  ],
+  "aplicaciones": [
+    {
+      "displayName": "Portal de RRHH",
+      "description": "Aplicacion interna: Portal de RRHH",
+      "signInAudience": "AzureADMyOrg",
+      "redirectUris": [
+        "https://portalderrhh.empresa.local/callback"
+      ]
+    },
+    {
+      "displayName": "Gestion de Almacen",
+      "description": "Aplicacion interna: Gestion de Almacen",
+      "signInAudience": "AzureADMyOrg",
+      "redirectUris": [
+        "https://gestiondealmacen.empresa.local/callback"
+      ]
+    }
+  ],
+  "relaciones": [
+    {
+      "tipo": "membresia",
+      "usuario": "carlos.s@{tenant}",
+      "grupo": "Departamento de Finanzas"
+    },
+    {
+      "tipo": "membresia",
+      "usuario": "elena.p@{tenant}",
+      "grupo": "Departamento de Produccion"
+    },
+    {
+      "tipo": "membresia",
+      "usuario": "pablo.g@{tenant}",
+      "grupo": "Departamento de Almacen"
+    },
+    {
+      "tipo": "membresia",
+      "usuario": "sara.f@{tenant}",
+      "grupo": "Departamento de Finanzas"
+    },
+    {
+      "tipo": "membresia",
+      "usuario": "alberto.r@{tenant}",
+      "grupo": "Departamento de Produccion"
+    }
+  ],
+  "vulnerabilidad": "escenarioej2_sp_owner"
+}

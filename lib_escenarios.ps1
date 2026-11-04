@@ -10,20 +10,27 @@
       - Aplicación de una vulnerabilidad según su tipo
 .NOTES
     Depende de lib_ui.ps1 (funciones Write-Lab*).
-    Se carga por dot-sourcing desde creacion_automatica.ps1.
+    Se carga por dot-sourcing desde creauto.ps1.
 
     ESTRUCTURA DE CARPETAS:
       escenarios/
         escenario/   <- un .json por escenario
         vulnerab/    <- un .json por vulnerabilidad
+        .secrets/    <- semillas locales por escenario (fuera de Git)
+
+    SEGURIDAD:
+    Los JSON de escenario NO contienen contraseñas. Las contraseñas se
+    derivan en creauto.ps1 / creamanual.ps1 desde la semilla local del
+    escenario. Si un JSON antiguo aún tuviera un campo 'password', esta
+    librería lo ignora al construir el objeto normalizado.
 #>
 
 # ============================================================
 # RUTAS CANÓNICAS
 # ============================================================
-$script:LabEscenariosRoot          = Join-Path $PSScriptRoot "escenarios"
-$script:LabEscenariosPath          = Join-Path $script:LabEscenariosRoot "escenario"
-$script:LabVulnerabilidadesPath    = Join-Path $script:LabEscenariosRoot "vulnerab"
+$script:LabEscenariosRoot       = Join-Path $PSScriptRoot 'escenarios'
+$script:LabEscenariosPath       = Join-Path $script:LabEscenariosRoot 'escenario'
+$script:LabVulnerabilidadesPath = Join-Path $script:LabEscenariosRoot 'vulnerab'
 
 # ============================================================
 # FUNCIONES PÚBLICAS: RUTAS
@@ -56,10 +63,10 @@ function Get-LabEscenariosDisponibles {
     .OUTPUTS
         Array de strings, ordenado alfabéticamente. Vacío si no hay carpeta o ficheros.
     #>
-    if (-not (Test-Path $script:LabEscenariosPath)) {
+    if (-not (Test-Path -Path $script:LabEscenariosPath)) {
         return @()
     }
-    $files = Get-ChildItem -Path $script:LabEscenariosPath -Filter "*.json" -File -ErrorAction SilentlyContinue
+    $files = Get-ChildItem -Path $script:LabEscenariosPath -Filter '*.json' -File -ErrorAction SilentlyContinue
     return @($files | ForEach-Object { $_.BaseName } | Sort-Object)
 }
 
@@ -70,10 +77,10 @@ function Get-LabVulnerabilidadesDisponibles {
     .OUTPUTS
         Array de strings, ordenado alfabéticamente. Vacío si no hay carpeta o ficheros.
     #>
-    if (-not (Test-Path $script:LabVulnerabilidadesPath)) {
+    if (-not (Test-Path -Path $script:LabVulnerabilidadesPath)) {
         return @()
     }
-    $files = Get-ChildItem -Path $script:LabVulnerabilidadesPath -Filter "*.json" -File -ErrorAction SilentlyContinue
+    $files = Get-ChildItem -Path $script:LabVulnerabilidadesPath -Filter '*.json' -File -ErrorAction SilentlyContinue
     return @($files | ForEach-Object { $_.BaseName } | Sort-Object)
 }
 
@@ -87,12 +94,12 @@ function Get-LabEscenario {
         PSCustomObject normalizado con Usuarios, Grupos, Aplicaciones, Relaciones y Vulnerabilidad.
     #>
     param(
-        [Parameter(Mandatory=$true)]
+        [Parameter(Mandatory = $true)]
         [string]$Nombre
     )
 
     $path = Join-Path $script:LabEscenariosPath "$Nombre.json"
-    if (-not (Test-Path $path)) {
+    if (-not (Test-Path -Path $path)) {
         throw "No existe el escenario '$Nombre' en $($script:LabEscenariosPath)."
     }
 
@@ -131,13 +138,13 @@ function Get-LabEscenario {
     elseif ($raw.PSObject.Properties['Descripcion'])    { $descripcion = $raw.Descripcion }
 
     return [pscustomobject]@{
-        Nombre          = $Nombre
-        Descripcion     = $descripcion
-        Usuarios        = $usuarios
-        Grupos          = $grupos
-        Aplicaciones    = $aplicaciones
-        Relaciones      = $relaciones
-        Vulnerabilidad  = $vulnerabilidad
+        Nombre         = $Nombre
+        Descripcion    = $descripcion
+        Usuarios       = $usuarios
+        Grupos         = $grupos
+        Aplicaciones   = $aplicaciones
+        Relaciones     = $relaciones
+        Vulnerabilidad = $vulnerabilidad
     }
 }
 
@@ -148,15 +155,15 @@ function Get-LabVulnerabilidad {
     .PARAMETER Nombre
         Nombre de la vulnerabilidad (sin extensión).
     .OUTPUTS
-        PSCustomObject con nombre, tipo, parametros y requiereLicencia.
+        PSCustomObject con Nombre, Descripcion, Tipo, Parametros y RequiereLicencia.
     #>
     param(
-        [Parameter(Mandatory=$true)]
+        [Parameter(Mandatory = $true)]
         [string]$Nombre
     )
 
     $path = Join-Path $script:LabVulnerabilidadesPath "$Nombre.json"
-    if (-not (Test-Path $path)) {
+    if (-not (Test-Path -Path $path)) {
         throw "No existe la vulnerabilidad '$Nombre' en $($script:LabVulnerabilidadesPath)."
     }
 
@@ -197,7 +204,15 @@ function Get-LabVulnerabilidad {
 # solo referencian el tipo por nombre.
 
 function Invoke-VulnerabilidadServicePrincipalOwner {
-    param($Parametros, $Contexto)
+    <#
+    .SYNOPSIS
+        Aplica la vulnerabilidad ServicePrincipalOwner: añade un usuario
+        como owner de un service principal.
+    #>
+    param(
+        [Parameter(Mandatory = $true)] [object]$Parametros,
+        [Parameter(Mandatory = $true)] [hashtable]$Contexto
+    )
 
     $uKey = $Parametros.usuario
     $aKey = $Parametros.aplicacion
@@ -212,12 +227,12 @@ function Invoke-VulnerabilidadServicePrincipalOwner {
     $user = $Contexto.Usuarios[$uKey]
     $app  = $Contexto.Aplicaciones[$aKey]
 
-    $body = @{ "@odata.id" = "https://graph.microsoft.com/v1.0/directoryObjects/$($user.Id)" }
-    New-MgServicePrincipalOwnerByRef -ServicePrincipalId $app.ServicePrincipal.Id -BodyParameter $body -ErrorAction Stop
+    $body = @{ '@odata.id' = "https://graph.microsoft.com/v1.0/directoryObjects/$($user.Id)" }
+    $null = New-MgServicePrincipalOwnerByRef -ServicePrincipalId $app.ServicePrincipal.Id -BodyParameter $body -ErrorAction Stop
 
     return @(
         [pscustomobject]@{
-            tipo               = "ServicePrincipalOwner"
+            tipo               = 'ServicePrincipalOwner'
             servicePrincipalId = $app.ServicePrincipal.Id
             directoryObjectId  = $user.Id
         }
@@ -225,7 +240,15 @@ function Invoke-VulnerabilidadServicePrincipalOwner {
 }
 
 function Invoke-VulnerabilidadApplicationSecret {
-    param($Parametros, $Contexto)
+    <#
+    .SYNOPSIS
+        Aplica la vulnerabilidad ApplicationSecret: añade una credencial
+        (client secret) a una aplicación.
+    #>
+    param(
+        [Parameter(Mandatory = $true)] [object]$Parametros,
+        [Parameter(Mandatory = $true)] [hashtable]$Contexto
+    )
 
     $aKey = $Parametros.aplicacion
     if (-not $Contexto.Aplicaciones.ContainsKey($aKey)) {
@@ -234,14 +257,14 @@ function Invoke-VulnerabilidadApplicationSecret {
     $app = $Contexto.Aplicaciones[$aKey]
 
     $cred = @{
-        displayName = if ($Parametros.displayName) { $Parametros.displayName } else { "Lab credential" }
+        displayName = if ($Parametros.displayName) { $Parametros.displayName } else { 'Lab credential' }
         endDateTime = (Get-Date).AddYears(1)
     }
     $result = Add-MgApplicationPassword -ApplicationId $app.Application.Id -PasswordCredential $cred -ErrorAction Stop
 
     return @(
         [pscustomobject]@{
-            tipo          = "ApplicationSecret"
+            tipo          = 'ApplicationSecret'
             applicationId = $app.Application.Id
             keyId         = $result.KeyId
         }
@@ -249,7 +272,15 @@ function Invoke-VulnerabilidadApplicationSecret {
 }
 
 function Invoke-VulnerabilidadGroupOwner {
-    param($Parametros, $Contexto)
+    <#
+    .SYNOPSIS
+        Aplica la vulnerabilidad GroupOwner: añade un usuario como owner
+        de un grupo.
+    #>
+    param(
+        [Parameter(Mandatory = $true)] [object]$Parametros,
+        [Parameter(Mandatory = $true)] [hashtable]$Contexto
+    )
 
     $uKey = $Parametros.usuario
     $gKey = $Parametros.grupo
@@ -264,12 +295,12 @@ function Invoke-VulnerabilidadGroupOwner {
     $user  = $Contexto.Usuarios[$uKey]
     $group = $Contexto.Grupos[$gKey]
 
-    $body = @{ "@odata.id" = "https://graph.microsoft.com/v1.0/directoryObjects/$($user.Id)" }
-    New-MgGroupOwnerByRef -GroupId $group.Id -BodyParameter $body -ErrorAction Stop
+    $body = @{ '@odata.id' = "https://graph.microsoft.com/v1.0/directoryObjects/$($user.Id)" }
+    $null = New-MgGroupOwnerByRef -GroupId $group.Id -BodyParameter $body -ErrorAction Stop
 
     return @(
         [pscustomobject]@{
-            tipo              = "GroupOwner"
+            tipo              = 'GroupOwner'
             groupId           = $group.Id
             directoryObjectId = $user.Id
         }
@@ -277,10 +308,19 @@ function Invoke-VulnerabilidadGroupOwner {
 }
 
 function Invoke-VulnerabilidadPimEligibleRole {
-    param($Parametros, $Contexto)
+    <#
+    .SYNOPSIS
+        Aplica la vulnerabilidad PimEligibleRole: asigna un rol elegible
+        (PIM) a un usuario.
+    .DESCRIPTION
+        NOTA: requiere licencia P2 y el módulo Microsoft.Graph.Identity.Governance.
+        Se deja como aplicador de ejemplo; si el tenant no lo soporta, lanzará error.
+    #>
+    param(
+        [Parameter(Mandatory = $true)] [object]$Parametros,
+        [Parameter(Mandatory = $true)] [hashtable]$Contexto
+    )
 
-    # NOTA: requiere licencia P2 y el módulo Microsoft.Graph.Identity.Governance.
-    # Se deja como aplicador de ejemplo; si el tenant no lo soporta, lanzará error.
     $uKey = $Parametros.usuario
     $rol  = $Parametros.rol
 
@@ -295,24 +335,24 @@ function Invoke-VulnerabilidadPimEligibleRole {
     if ($roleDef -is [array]) { $roleDef = $roleDef[0] }
 
     $body = @{
-        action           = "adminAssign"
-        justification    = "Lab scenario"
+        action           = 'adminAssign'
+        justification    = 'Lab scenario'
         roleDefinitionId = $roleDef.Id
-        directoryScopeId = "/"
+        directoryScopeId = '/'
         principalId      = $user.Id
         scheduleInfo     = @{
-            startDateTime = (Get-Date).ToString("o")
+            startDateTime = (Get-Date).ToString('o')
             expiration    = @{
-                type     = "afterDuration"
-                duration = if ($Parametros.duracion) { $Parametros.duracion } else { "PT8H" }
+                type     = 'afterDuration'
+                duration = if ($Parametros.duracion) { $Parametros.duracion } else { 'PT8H' }
             }
         }
     }
-    New-MgRoleManagementDirectoryRoleEligibilityScheduleRequest -BodyParameter $body -ErrorAction Stop | Out-Null
+    $null = New-MgRoleManagementDirectoryRoleEligibilityScheduleRequest -BodyParameter $body -ErrorAction Stop
 
     return @(
         [pscustomobject]@{
-            tipo        = "PimEligibleRole"
+            tipo        = 'PimEligibleRole'
             principalId = $user.Id
             rol         = $rol
         }
@@ -331,15 +371,15 @@ function Invoke-LabVulnerabilidad {
         Array de objetos afectados (para registrar en el manifiesto).
     #>
     param(
-        [Parameter(Mandatory=$true)] [object]$Vulnerabilidad,
-        [Parameter(Mandatory=$true)] [hashtable]$Contexto
+        [Parameter(Mandatory = $true)] [object]$Vulnerabilidad,
+        [Parameter(Mandatory = $true)] [hashtable]$Contexto
     )
 
     switch ($Vulnerabilidad.Tipo) {
-        "ServicePrincipalOwner" { return (Invoke-VulnerabilidadServicePrincipalOwner -Parametros $Vulnerabilidad.Parametros -Contexto $Contexto) }
-        "ApplicationSecret"     { return (Invoke-VulnerabilidadApplicationSecret     -Parametros $Vulnerabilidad.Parametros -Contexto $Contexto) }
-        "GroupOwner"            { return (Invoke-VulnerabilidadGroupOwner            -Parametros $Vulnerabilidad.Parametros -Contexto $Contexto) }
-        "PimEligibleRole"       { return (Invoke-VulnerabilidadPimEligibleRole       -Parametros $Vulnerabilidad.Parametros -Contexto $Contexto) }
+        'ServicePrincipalOwner' { return (Invoke-VulnerabilidadServicePrincipalOwner -Parametros $Vulnerabilidad.Parametros -Contexto $Contexto) }
+        'ApplicationSecret'     { return (Invoke-VulnerabilidadApplicationSecret     -Parametros $Vulnerabilidad.Parametros -Contexto $Contexto) }
+        'GroupOwner'            { return (Invoke-VulnerabilidadGroupOwner            -Parametros $Vulnerabilidad.Parametros -Contexto $Contexto) }
+        'PimEligibleRole'       { return (Invoke-VulnerabilidadPimEligibleRole       -Parametros $Vulnerabilidad.Parametros -Contexto $Contexto) }
         default {
             throw "Tipo de vulnerabilidad no soportado: $($Vulnerabilidad.Tipo)"
         }

@@ -1,25 +1,11 @@
-Laboratorio para la versión completa con diferentes niveles de acceso 
-en EntraID.
-Revisado con VS Code, con la herramienta PSscriptanalyzer.
-En esta versión se saca la comprobación e instalación de los módulos
- del graph para agilizar la instalación de entornos.
-Se añaden diferentes tipos de conexiones con Microsoft
-Copiando el ps1 creacion_automatica.ps1 se logra crear más escenarios.
-
-Diferencias entre otras versiones:
-Conexiones con Microsoft de pago.
-.- PIM (Privileged Identity Management) P2 o Entra ID Governance. 
-Para roles elegibles como ruta de escalada.
-.- Unidades administrativas (AUs) Free para crearlas, P1 para 
-administrarlas.
-.-Roles personalizados. P1.
-Free permite "gestionar usuarios y grupos", mientras que P1 añade 
-grupos dinámicos y P2 añade PIM.
-
-
-Revisión de la versión:
-Ahora se añade la creación de escenarios automaticos con más de ellos.
-La inyección de vulnerabilidad ahora es elegible. No hace falta 
-modificar el script.
-Se modifica el clean_up para que revierta vulnerabilidades
-Se añade la verificación de lo creado antes de enviarlo a Entra ID en creación automática.
+Cambios de la Versión 03
+Se cambian los nombres de los archivos: 
+- creacion_automatica.ps1 = creauto.ps1
+- creacion_personalizada = creamanual.ps1
+Cambios en las contraseñas:
+- Se crean en local.
+- la semilla de generación se asocia a un nombre de escenario manual que se pide al principio o se generar como manal_<timestamp> 
+- Se generan con RandomNumberGenerator con limitación de 32 Bytes.
+- Los escenarios ya no tienen el campo contraseña
+Se meten en .gitignore para no replicar las contraseñas guardadas
+Se normalizan los archivos

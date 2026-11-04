@@ -12,12 +12,16 @@
 .NOTES
     Depende de lib_ui.ps1 (funciones Write-Lab*).
     Se carga por dot-sourcing.
+
+    SEGURIDAD:
+    menu_config.json NO contiene credenciales. Solo opciones del menú
+    (por ejemplo, Verbose). No debe añadirse aquí ningún secreto.
 #>
 
 # ============================================================
 # RUTA CANÓNICA
 # ============================================================
-$script:LabConfigFileName = "menu_config.json"
+$script:LabConfigFileName = 'menu_config.json'
 $script:LabConfigPath     = Join-Path $PSScriptRoot $script:LabConfigFileName
 
 # ============================================================
@@ -55,7 +59,7 @@ function Test-LabConfigExists {
     .SYNOPSIS
         Devuelve $true si existe el fichero de configuración.
     #>
-    return (Test-Path $script:LabConfigPath)
+    return (Test-Path -Path $script:LabConfigPath)
 }
 
 function Get-LabConfig {
@@ -71,14 +75,14 @@ function Get-LabConfig {
     #>
     $defaults = Get-LabConfigDefaults
 
-    if (-not (Test-Path $script:LabConfigPath)) {
+    if (-not (Test-Path -Path $script:LabConfigPath)) {
         return $defaults
     }
 
     try {
         $loaded = Get-Content -Path $script:LabConfigPath -Raw -Encoding UTF8 | ConvertFrom-Json
     } catch {
-        Write-LabWarn "No se pudo leer menu_config.json. Usando valores por defecto."
+        Write-LabWarn 'No se pudo leer menu_config.json. Usando valores por defecto.'
         return $defaults
     }
 
@@ -109,7 +113,7 @@ function Save-LabConfig {
         $true si se guardó correctamente, $false si falló.
     #>
     param(
-        [Parameter(Mandatory=$true)]
+        [Parameter(Mandatory = $true)]
         [hashtable]$Config
     )
 
@@ -147,7 +151,7 @@ function Update-LabConfig {
         Hashtable con la configuración resultante.
     #>
     param(
-        [Parameter(Mandatory=$true)]
+        [Parameter(Mandatory = $true)]
         [hashtable]$Cambios
     )
 

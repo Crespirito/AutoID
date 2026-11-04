@@ -35,14 +35,14 @@ $ErrorActionPreference = 'Stop'
 # ============================================================
 # CARGA DE LIBRERÍAS
 # ============================================================
-. (Join-Path $PSScriptRoot "lib_ui.ps1")
-. (Join-Path $PSScriptRoot "lib_manifiesto.ps1")
+. (Join-Path $PSScriptRoot 'lib_ui.ps1')
+. (Join-Path $PSScriptRoot 'lib_manifiesto.ps1')
 
 # ============================================================
 # VERIFICACIÓN DE SESIÓN (gestionada por el menú)
 # ============================================================
 if (-not (Get-MgContext -ErrorAction SilentlyContinue)) {
-    Write-LabError "No hay sesión de Graph activa. Ejecuta este script desde menu.ps1."
+    Write-LabError 'No hay sesión de Graph activa. Ejecuta este script desde menu.ps1.'
     exit 1
 }
 
@@ -57,20 +57,31 @@ if (-not $ManifiestoPath) {
 $log = [System.Collections.Generic.List[object]]::new()
 
 function Add-LogEntry {
+    <#
+    .SYNOPSIS
+        Añade una entrada al log interno y la muestra por consola.
+    #>
     param(
-        [string]$Categoria,   # "Info", "Warning", "Error"
+        [Parameter(Mandatory = $true)]
+        [string]$Categoria,
+
+        [Parameter(Mandatory = $true)]
         [string]$Mensaje,
-        [object]$Detalle
+
+        [Parameter(Mandatory = $false)]
+        [object]$Detalle = $null
     )
+
     $log.Add([pscustomobject]@{
-        Timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+        Timestamp = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'
         Categoria = $Categoria
         Mensaje   = $Mensaje
         Detalle   = $Detalle
     })
+
     switch ($Categoria) {
-        "Error"   { Write-LabError $Mensaje }
-        "Warning" { Write-LabWarn  $Mensaje }
+        'Error'   { Write-LabError $Mensaje }
+        'Warning' { Write-LabWarn  $Mensaje }
         default   { Write-LabInfo  $Mensaje }
     }
 }
@@ -78,17 +89,17 @@ function Add-LogEntry {
 # ============================================================
 # FASE 1: LECTURA DEL MANIFIESTO
 # ============================================================
-Write-LabBanner "Iniciando limpieza del laboratorio"
+Write-LabBanner 'Iniciando limpieza del laboratorio'
 
-if (-not (Test-Path $ManifiestoPath)) {
-    Add-LogEntry -Categoria "Error" -Mensaje "No se encuentra el manifiesto." -Detalle $ManifiestoPath
-    Write-Host "Asegúrate de que el script de creación se ejecutó correctamente." -ForegroundColor Gray
+if (-not (Test-Path -Path $ManifiestoPath)) {
+    Add-LogEntry -Categoria 'Error' -Mensaje 'No se encuentra el manifiesto.' -Detalle $ManifiestoPath
+    Write-Host 'Asegúrate de que el script de creación se ejecutó correctamente.' -ForegroundColor Gray
     exit 1
 }
 
 try {
     $manifiesto = Get-LabManifiesto -Path $ManifiestoPath
-    Add-LogEntry -Categoria "Info" -Mensaje "Manifiesto cargado correctamente." -Detalle @{
+    Add-LogEntry -Categoria 'Info' -Mensaje 'Manifiesto cargado correctamente.' -Detalle @{
         Fecha    = $manifiesto.Fecha
         Tenant   = $manifiesto.TenantDomain
         Usuarios = $manifiesto.Usuarios.Count
@@ -97,15 +108,15 @@ try {
         SPs      = $manifiesto.ServicePrincipals.Count
     }
 } catch {
-    Add-LogEntry -Categoria "Error" -Mensaje "Error al leer el manifiesto." -Detalle $_.Exception.Message
+    Add-LogEntry -Categoria 'Error' -Mensaje 'Error al leer el manifiesto.' -Detalle $_.Exception.Message
     exit 1
 }
 
 # ============================================================
 # FASE 2: RESUMEN Y CONFIRMACIÓN
 # ============================================================
-Write-Host ""
-Write-Host "--- Contenido del manifiesto ---" -ForegroundColor Yellow
+Write-Host ''
+Write-Host '--- Contenido del manifiesto ---' -ForegroundColor Yellow
 Write-Host "  Fecha del manifiesto : $($manifiesto.Fecha)"
 Write-Host "  Tenant               : $($manifiesto.TenantDomain)"
 Write-Host "  Usuarios             : $($manifiesto.Usuarios.Count)"
@@ -119,13 +130,13 @@ if ($manifiesto.PSObject.Properties['Vulnerabilidades']) {
     $vulns = @($manifiesto.Vulnerabilidades)
 }
 Write-Host "  Vulnerabilidades     : $($vulns.Count)"
-Write-Host ""
+Write-Host ''
 
 if (-not $Forzar) {
-    Write-Host "¿Estás seguro de que quieres ELIMINAR todos estos objetos?" -ForegroundColor Yellow
+    Write-Host '¿Estás seguro de que quieres ELIMINAR todos estos objetos?' -ForegroundColor Yellow
     $confirmacion = Read-Host "Escribe 'SI' para confirmar"
-    if ($confirmacion -ne "SI") {
-        Write-LabInfo "Operación cancelada por el usuario."
+    if ($confirmacion -ne 'SI') {
+        Write-LabInfo 'Operación cancelada por el usuario.'
         exit 0
     }
 }
@@ -136,7 +147,7 @@ if (-not $Forzar) {
 # Se revierten ANTES de borrar objetos, para que las relaciones
 # (owners, credenciales, PIM) desaparezcan limpiamente.
 if ($vulns.Count -gt 0) {
-    Write-LabBanner "Revirtiendo vulnerabilidades aplicadas"
+    Write-LabBanner 'Revirtiendo vulnerabilidades aplicadas'
 
     foreach ($v in $vulns) {
         try {
@@ -146,81 +157,72 @@ if ($vulns.Count -gt 0) {
             Write-Host "  Revirtiendo: $($v.nombre) ($tipo)" -ForegroundColor Gray
 
             switch ($tipo) {
-                "ServicePrincipalOwner" {
+                'ServicePrincipalOwner' {
                     foreach ($o in $afectados) {
                         try {
-                            Remove-MgServicePrincipalOwnerByRef -ServicePrincipalId $o.servicePrincipalId -DirectoryObjectId $o.directoryObjectId -Confirm:$false -ErrorAction Stop
-                            Add-LogEntry -Categoria "Info" -Mensaje "Owner de SP revertido." -Detalle $o
+                            $null = Remove-MgServicePrincipalOwnerByRef -ServicePrincipalId $o.servicePrincipalId -DirectoryObjectId $o.directoryObjectId -Confirm:$false -ErrorAction Stop
+                            Add-LogEntry -Categoria 'Info' -Mensaje 'Owner de SP revertido.' -Detalle $o
                         } catch {
-                            Add-LogEntry -Categoria "Warning" -Mensaje "No se pudo revertir owner de SP." -Detalle @{ Objeto = $o; Error = $_.Exception.Message }
+                            Add-LogEntry -Categoria 'Warning' -Mensaje 'No se pudo revertir owner de SP.' -Detalle @{ Objeto = $o; Error = $_.Exception.Message }
                         }
                     }
                 }
-                "GroupOwner" {
+                'GroupOwner' {
                     foreach ($o in $afectados) {
                         try {
-                            Remove-MgGroupOwnerByRef -GroupId $o.groupId -DirectoryObjectId $o.directoryObjectId -Confirm:$false -ErrorAction Stop
-                            Add-LogEntry -Categoria "Info" -Mensaje "Owner de grupo revertido." -Detalle $o
+                            $null = Remove-MgGroupOwnerByRef -GroupId $o.groupId -DirectoryObjectId $o.directoryObjectId -Confirm:$false -ErrorAction Stop
+                            Add-LogEntry -Categoria 'Info' -Mensaje 'Owner de grupo revertido.' -Detalle $o
                         } catch {
-                            Add-LogEntry -Categoria "Warning" -Mensaje "No se pudo revertir owner de grupo." -Detalle @{ Objeto = $o; Error = $_.Exception.Message }
+                            Add-LogEntry -Categoria 'Warning' -Mensaje 'No se pudo revertir owner de grupo.' -Detalle @{ Objeto = $o; Error = $_.Exception.Message }
                         }
                     }
                 }
-                "ApplicationSecret" {
+                'ApplicationSecret' {
                     foreach ($o in $afectados) {
                         try {
-                            Remove-MgApplicationPassword -ApplicationId $o.applicationId -KeyId $o.keyId -Confirm:$false -ErrorAction Stop
-                            Add-LogEntry -Categoria "Info" -Mensaje "Credencial de app revertida." -Detalle $o
+                            $null = Remove-MgApplicationPassword -ApplicationId $o.applicationId -KeyId $o.keyId -Confirm:$false -ErrorAction Stop
+                            Add-LogEntry -Categoria 'Info' -Mensaje 'Credencial de app revertida.' -Detalle $o
                         } catch {
-                            Add-LogEntry -Categoria "Warning" -Mensaje "No se pudo revertir credencial de app." -Detalle @{ Objeto = $o; Error = $_.Exception.Message }
+                            Add-LogEntry -Categoria 'Warning' -Mensaje 'No se pudo revertir credencial de app.' -Detalle @{ Objeto = $o; Error = $_.Exception.Message }
                         }
                     }
                 }
-                
-}
+                'PimEligibleRole' {
+                    foreach ($o in $afectados) {
+                        try {
+                            $requests = Get-MgRoleManagementDirectoryRoleEligibilityScheduleRequest `
+                                -Filter "principalId eq '$($o.principalId)'" -All -ErrorAction Stop
 
-"PimEligibleRole" {
-    foreach ($o in $afectados) {
-        try {
-            $requests = Get-MgRoleManagementDirectoryRoleEligibilityScheduleRequest `
-                -Filter "principalId eq '$($o.principalId)'" -All -ErrorAction Stop
-
-            foreach ($r in @($requests)) {
-                Remove-MgRoleManagementDirectoryRoleEligibilityScheduleRequest `
-                    -UnifiedRoleEligibilityScheduleRequestId $r.Id `
-                    -Confirm:$false -ErrorAction Stop
-            }
-            Add-LogEntry -Categoria "Info" -Mensaje "Rol PIM revertido." -Detalle $o
-        } catch {
-            Add-LogEntry -Categoria "Warning" -Mensaje "No se pudo revertir rol PIM." -Detalle @{ Objeto = $o; Error = $_.Exception.Message }
-        }
-    }
-}
-                            Add-LogEntry -Categoria "Info" -Mensaje "Rol PIM revertido." -Detalle $o
+                            foreach ($r in @($requests)) {
+                                $null = Remove-MgRoleManagementDirectoryRoleEligibilityScheduleRequest `
+                                    -UnifiedRoleEligibilityScheduleRequestId $r.Id `
+                                    -Confirm:$false -ErrorAction Stop
+                            }
+                            Add-LogEntry -Categoria 'Info' -Mensaje 'Rol PIM revertido.' -Detalle $o
                         } catch {
-                            Add-LogEntry -Categoria "Warning" -Mensaje "No se pudo revertir rol PIM." -Detalle @{ Objeto = $o; Error = $_.Exception.Message }
+                            Add-LogEntry -Categoria 'Warning' -Mensaje 'No se pudo revertir rol PIM.' -Detalle @{ Objeto = $o; Error = $_.Exception.Message }
                         }
                     }
                 }
                 default {
-                    Add-LogEntry -Categoria "Warning" -Mensaje "Tipo de vulnerabilidad desconocido; se omite reversión." -Detalle $tipo
+                    Add-LogEntry -Categoria 'Warning' -Mensaje 'Tipo de vulnerabilidad desconocido; se omite reversión.' -Detalle $tipo
                 }
             }
         } catch {
-            Add-LogEntry -Categoria "Error" -Mensaje "Error al revertir vulnerabilidad." -Detalle @{
+            Add-LogEntry -Categoria 'Error' -Mensaje 'Error al revertir vulnerabilidad.' -Detalle @{
                 Vulnerabilidad = $v.nombre
                 Error          = $_.Exception.Message
             }
         }
     }
 } else {
-    Write-LabInfo "No hay vulnerabilidades registradas en el manifiesto."
+    Write-LabInfo 'No hay vulnerabilidades registradas en el manifiesto.'
 }
 
 # ============================================================
 # FASE 4: ELIMINACIÓN DE APLICACIONES Y SERVICE PRINCIPALS
 # ============================================================
-Write-LabBanner "Eliminando aplicaciones y service principals"
+Write-LabBanner 'Eliminando aplicaciones y service principals'
 
 foreach ($nombreApp in $manifiesto.Aplicaciones) {
     try {
@@ -238,21 +240,21 @@ foreach ($nombreApp in $manifiesto.Aplicaciones) {
 
                 $asignaciones = Get-MgServicePrincipalAppRoleAssignedTo -ServicePrincipalId $sp.Id -All -ErrorAction SilentlyContinue
                 foreach ($asig in $asignaciones) {
-                    Remove-MgServicePrincipalAppRoleAssignedTo -ServicePrincipalId $sp.Id -AppRoleAssignmentId $asig.Id -Confirm:$false -ErrorAction SilentlyContinue
+                    $null = Remove-MgServicePrincipalAppRoleAssignedTo -ServicePrincipalId $sp.Id -AppRoleAssignmentId $asig.Id -Confirm:$false -ErrorAction SilentlyContinue
                 }
 
-                Remove-MgServicePrincipal -ServicePrincipalId $sp.Id -Confirm:$false -ErrorAction Stop
-                Add-LogEntry -Categoria "Info" -Mensaje "Service Principal eliminado." -Detalle $sp.Id
+                $null = Remove-MgServicePrincipal -ServicePrincipalId $sp.Id -Confirm:$false -ErrorAction Stop
+                Add-LogEntry -Categoria 'Info' -Mensaje 'Service Principal eliminado.' -Detalle $sp.Id
             }
 
             # 2. Eliminar la aplicación
-            Remove-MgApplication -ApplicationId $app.Id -Confirm:$false -ErrorAction Stop
-            Add-LogEntry -Categoria "Info" -Mensaje "Aplicación eliminada." -Detalle $nombreApp
+            $null = Remove-MgApplication -ApplicationId $app.Id -Confirm:$false -ErrorAction Stop
+            Add-LogEntry -Categoria 'Info' -Mensaje 'Aplicación eliminada.' -Detalle $nombreApp
         } else {
-            Add-LogEntry -Categoria "Warning" -Mensaje "Aplicación no encontrada." -Detalle $nombreApp
+            Add-LogEntry -Categoria 'Warning' -Mensaje 'Aplicación no encontrada.' -Detalle $nombreApp
         }
     } catch {
-        Add-LogEntry -Categoria "Error" -Mensaje "Error al eliminar aplicación." -Detalle @{
+        Add-LogEntry -Categoria 'Error' -Mensaje 'Error al eliminar aplicación.' -Detalle @{
             App   = $nombreApp
             Error = $_.Exception.Message
         }
@@ -267,13 +269,13 @@ foreach ($spId in $manifiesto.ServicePrincipals) {
             if ($sp -is [array]) { $sp = $sp[0] }
             $asignaciones = Get-MgServicePrincipalAppRoleAssignedTo -ServicePrincipalId $spId -All -ErrorAction SilentlyContinue
             foreach ($asig in $asignaciones) {
-                Remove-MgServicePrincipalAppRoleAssignedTo -ServicePrincipalId $spId -AppRoleAssignmentId $asig.Id -Confirm:$false -ErrorAction SilentlyContinue
+                $null = Remove-MgServicePrincipalAppRoleAssignedTo -ServicePrincipalId $spId -AppRoleAssignmentId $asig.Id -Confirm:$false -ErrorAction SilentlyContinue
             }
-            Remove-MgServicePrincipal -ServicePrincipalId $spId -Confirm:$false -ErrorAction Stop
-            Add-LogEntry -Categoria "Info" -Mensaje "Service Principal huérfano eliminado." -Detalle $spId
+            $null = Remove-MgServicePrincipal -ServicePrincipalId $spId -Confirm:$false -ErrorAction Stop
+            Add-LogEntry -Categoria 'Info' -Mensaje 'Service Principal huérfano eliminado.' -Detalle $spId
         }
     } catch {
-        Add-LogEntry -Categoria "Warning" -Mensaje "No se pudo eliminar SP huérfano." -Detalle @{
+        Add-LogEntry -Categoria 'Warning' -Mensaje 'No se pudo eliminar SP huérfano.' -Detalle @{
             SP    = $spId
             Error = $_.Exception.Message
         }
@@ -283,7 +285,7 @@ foreach ($spId in $manifiesto.ServicePrincipals) {
 # ============================================================
 # FASE 5: ELIMINACIÓN DE GRUPOS
 # ============================================================
-Write-LabBanner "Eliminando grupos"
+Write-LabBanner 'Eliminando grupos'
 
 foreach ($nombreGrupo in $manifiesto.Grupos) {
     try {
@@ -296,23 +298,23 @@ foreach ($nombreGrupo in $manifiesto.Grupos) {
             # Vaciar miembros
             $miembros = Get-MgGroupMember -GroupId $grupo.Id -All -ErrorAction SilentlyContinue
             foreach ($miembro in $miembros) {
-                Remove-MgGroupMemberByRef -GroupId $grupo.Id -DirectoryObjectId $miembro.Id -Confirm:$false -ErrorAction SilentlyContinue
+                $null = Remove-MgGroupMemberByRef -GroupId $grupo.Id -DirectoryObjectId $miembro.Id -Confirm:$false -ErrorAction SilentlyContinue
             }
 
             # Eliminar propietarios
             $propietarios = Get-MgGroupOwner -GroupId $grupo.Id -All -ErrorAction SilentlyContinue
             foreach ($prop in $propietarios) {
-                Remove-MgGroupOwnerByRef -GroupId $grupo.Id -DirectoryObjectId $prop.Id -Confirm:$false -ErrorAction SilentlyContinue
+                $null = Remove-MgGroupOwnerByRef -GroupId $grupo.Id -DirectoryObjectId $prop.Id -Confirm:$false -ErrorAction SilentlyContinue
             }
 
             # Eliminar grupo
-            Remove-MgGroup -GroupId $grupo.Id -Confirm:$false -ErrorAction Stop
-            Add-LogEntry -Categoria "Info" -Mensaje "Grupo eliminado." -Detalle $nombreGrupo
+            $null = Remove-MgGroup -GroupId $grupo.Id -Confirm:$false -ErrorAction Stop
+            Add-LogEntry -Categoria 'Info' -Mensaje 'Grupo eliminado.' -Detalle $nombreGrupo
         } else {
-            Add-LogEntry -Categoria "Warning" -Mensaje "Grupo no encontrado." -Detalle $nombreGrupo
+            Add-LogEntry -Categoria 'Warning' -Mensaje 'Grupo no encontrado.' -Detalle $nombreGrupo
         }
     } catch {
-        Add-LogEntry -Categoria "Error" -Mensaje "Error al eliminar grupo." -Detalle @{
+        Add-LogEntry -Categoria 'Error' -Mensaje 'Error al eliminar grupo.' -Detalle @{
             Grupo = $nombreGrupo
             Error = $_.Exception.Message
         }
@@ -322,20 +324,20 @@ foreach ($nombreGrupo in $manifiesto.Grupos) {
 # ============================================================
 # FASE 6: ELIMINACIÓN DE USUARIOS
 # ============================================================
-Write-LabBanner "Eliminando usuarios"
+Write-LabBanner 'Eliminando usuarios'
 
 foreach ($upn in $manifiesto.Usuarios) {
     try {
         $usuario = Get-MgUser -UserId $upn -ErrorAction SilentlyContinue
         if ($usuario) {
             if ($usuario -is [array]) { $usuario = $usuario[0] }
-            Remove-MgUser -UserId $upn -Confirm:$false -ErrorAction Stop
-            Add-LogEntry -Categoria "Info" -Mensaje "Usuario eliminado." -Detalle $upn
+            $null = Remove-MgUser -UserId $upn -Confirm:$false -ErrorAction Stop
+            Add-LogEntry -Categoria 'Info' -Mensaje 'Usuario eliminado.' -Detalle $upn
         } else {
-            Add-LogEntry -Categoria "Warning" -Mensaje "Usuario no encontrado." -Detalle $upn
+            Add-LogEntry -Categoria 'Warning' -Mensaje 'Usuario no encontrado.' -Detalle $upn
         }
     } catch {
-        Add-LogEntry -Categoria "Error" -Mensaje "Error al eliminar usuario." -Detalle @{
+        Add-LogEntry -Categoria 'Error' -Mensaje 'Error al eliminar usuario.' -Detalle @{
             Usuario = $upn
             Error   = $_.Exception.Message
         }
@@ -350,17 +352,17 @@ try {
     if ($esEstandar) {
         $manifiestoProcesado = Rename-LabManifiestoProcesado
         if ($manifiestoProcesado) {
-            Add-LogEntry -Categoria "Info" -Mensaje "Manifiesto renombrado como procesado." -Detalle $manifiestoProcesado
+            Add-LogEntry -Categoria 'Info' -Mensaje 'Manifiesto renombrado como procesado.' -Detalle $manifiestoProcesado
         } else {
-            Add-LogEntry -Categoria "Warning" -Mensaje "No se pudo renombrar el manifiesto estándar."
+            Add-LogEntry -Categoria 'Warning' -Mensaje 'No se pudo renombrar el manifiesto estándar.'
         }
     } else {
         $manifiestoProcesado = $ManifiestoPath -replace '\.json$', "_procesado_$(Get-Date -Format 'yyyyMMdd_HHmmss').json"
-        Move-Item -Path $ManifiestoPath -Destination $manifiestoProcesado -Force
-        Add-LogEntry -Categoria "Info" -Mensaje "Manifiesto renombrado como procesado." -Detalle $manifiestoProcesado
+        $null = Move-Item -Path $ManifiestoPath -Destination $manifiestoProcesado -Force
+        Add-LogEntry -Categoria 'Info' -Mensaje 'Manifiesto renombrado como procesado.' -Detalle $manifiestoProcesado
     }
 } catch {
-    Add-LogEntry -Categoria "Warning" -Mensaje "No se pudo renombrar el manifiesto." -Detalle $_.Exception.Message
+    Add-LogEntry -Categoria 'Warning' -Mensaje 'No se pudo renombrar el manifiesto.' -Detalle $_.Exception.Message
 }
 
 # ============================================================
@@ -374,15 +376,15 @@ try {
     Write-LabError "No se pudo guardar el log en $logPath : $($_.Exception.Message)"
 }
 
-$errores = ($log | Where-Object Categoria -eq "Error").Count
-$avisos  = ($log | Where-Object Categoria -eq "Warning").Count
+$errores = ($log | Where-Object Categoria -eq 'Error').Count
+$avisos  = ($log | Where-Object Categoria -eq 'Warning').Count
 $total   = $log.Count
 
-Write-Host ""
-Write-Host "--- Resumen de limpieza ---" -ForegroundColor Cyan
+Write-Host ''
+Write-Host '--- Resumen de limpieza ---' -ForegroundColor Cyan
 Write-Host "Eventos totales: $total"
 Write-Host "Avisos:          $avisos" -ForegroundColor Yellow
 Write-Host "Errores:         $errores" -ForegroundColor Red
 Write-Host "Log completo:    $logPath" -ForegroundColor Gray
-Write-Host ""
-Write-LabOk "Limpieza completada."
+Write-Host ''
+Write-LabOk 'Limpieza completada.'

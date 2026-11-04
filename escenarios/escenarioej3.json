@@ -1,0 +1,263 @@
+{
+  "nombre": "escenarioej3",
+  "descripcion": "Escenario de ejemplo 3: 10 usuarios, 10 grupos, 10 aplicaciones (biblioteca completa).",
+  "usuarios": [
+    {
+      "displayName": "Lucia Garcia",
+      "upn": "lucia.g@{tenant}",
+      "mailNickname": "lucia.g",
+      "department": "Ventas",
+      "jobTitle": "Comercial"
+    },
+    {
+      "displayName": "Javier Martinez",
+      "upn": "javier.m@{tenant}",
+      "mailNickname": "javier.m",
+      "department": "IT",
+      "jobTitle": "Administrador de Sistemas"
+    },
+    {
+      "displayName": "Maria Lopez",
+      "upn": "maria.l@{tenant}",
+      "mailNickname": "maria.l",
+      "department": "RRHH",
+      "jobTitle": "Tecnico de RRHH"
+    },
+    {
+      "displayName": "Carlos Sanchez",
+      "upn": "carlos.s@{tenant}",
+      "mailNickname": "carlos.s",
+      "department": "Finanzas",
+      "jobTitle": "Analista Financiero"
+    },
+    {
+      "displayName": "Elena Perez",
+      "upn": "elena.p@{tenant}",
+      "mailNickname": "elena.p",
+      "department": "Produccion",
+      "jobTitle": "Operario"
+    },
+    {
+      "displayName": "Pablo Gomez",
+      "upn": "pablo.g@{tenant}",
+      "mailNickname": "pablo.g",
+      "department": "Almacen",
+      "jobTitle": "Responsable de Almacen"
+    },
+    {
+      "displayName": "Sara Fernandez",
+      "upn": "sara.f@{tenant}",
+      "mailNickname": "sara.f",
+      "department": "Calidad",
+      "jobTitle": "Tecnico de Calidad"
+    },
+    {
+      "displayName": "Alberto Ruiz",
+      "upn": "alberto.r@{tenant}",
+      "mailNickname": "alberto.r",
+      "department": "Compras",
+      "jobTitle": "Comprador"
+    },
+    {
+      "displayName": "Carmen Diaz",
+      "upn": "carmen.d@{tenant}",
+      "mailNickname": "carmen.d",
+      "department": "Marketing",
+      "jobTitle": "Especialista Marketing"
+    },
+    {
+      "displayName": "David Moreno",
+      "upn": "david.m@{tenant}",
+      "mailNickname": "david.m",
+      "department": "Legal",
+      "jobTitle": "Asesor Legal"
+    }
+  ],
+  "grupos": [
+    {
+      "displayName": "Departamento de Ventas",
+      "description": "Usuarios del departamento de Ventas",
+      "mailNickname": "departamento-ventas"
+    },
+    {
+      "displayName": "Departamento de IT",
+      "description": "Usuarios del departamento de IT",
+      "mailNickname": "departamento-it"
+    },
+    {
+      "displayName": "Departamento de RRHH",
+      "description": "Usuarios del departamento de RRHH",
+      "mailNickname": "departamento-rrhh"
+    },
+    {
+      "displayName": "Departamento de Finanzas",
+      "description": "Usuarios del departamento de Finanzas",
+      "mailNickname": "departamento-finanzas"
+    },
+    {
+      "displayName": "Departamento de Produccion",
+      "description": "Usuarios del departamento de Produccion",
+      "mailNickname": "departamento-produccion"
+    },
+    {
+      "displayName": "Departamento de Almacen",
+      "description": "Usuarios del departamento de Almacen",
+      "mailNickname": "departamento-almacen"
+    },
+    {
+      "displayName": "Departamento de Calidad",
+      "description": "Usuarios del departamento de Calidad",
+      "mailNickname": "departamento-calidad"
+    },
+    {
+      "displayName": "Departamento de Compras",
+      "description": "Usuarios del departamento de Compras",
+      "mailNickname": "departamento-compras"
+    },
+    {
+      "displayName": "Departamento de Marketing",
+      "description": "Usuarios del departamento de Marketing",
+      "mailNickname": "departamento-marketing"
+    },
+    {
+      "displayName": "Departamento de Legal",
+      "description": "Usuarios del departamento de Legal",
+      "mailNickname": "departamento-legal"
+    }
+  ],
+  "aplicaciones": [
+    {
+      "displayName": "Panel de Analisis Comercial",
+      "description": "Aplicacion interna: Panel de Analisis Comercial",
+      "signInAudience": "AzureADMyOrg",
+      "redirectUris": [
+        "https://paneldeanalisiscomercial.empresa.local/callback"
+      ]
+    },
+    {
+      "displayName": "Portal de RRHH",
+      "description": "Aplicacion interna: Portal de RRHH",
+      "signInAudience": "AzureADMyOrg",
+      "redirectUris": [
+        "https://portalderrhh.empresa.local/callback"
+      ]
+    },
+    {
+      "displayName": "Gestion de Almacen",
+      "description": "Aplicacion interna: Gestion de Almacen",
+      "signInAudience": "AzureADMyOrg",
+      "redirectUris": [
+        "https://gestiondealmacen.empresa.local/callback"
+      ]
+    },
+    {
+      "displayName": "ERP Financiero",
+      "description": "Aplicacion interna: ERP Financiero",
+      "signInAudience": "AzureADMyOrg",
+      "redirectUris": [
+        "https://erpfinanciero.empresa.local/callback"
+      ]
+    },
+    {
+      "displayName": "Herramienta de Calidad",
+      "description": "Aplicacion interna: Herramienta de Calidad",
+      "signInAudience": "AzureADMyOrg",
+      "redirectUris": [
+        "https://herramientadecalidad.empresa.local/callback"
+      ]
+    },
+    {
+      "displayName": "Portal de Compras",
+      "description": "Aplicacion interna: Portal de Compras",
+      "signInAudience": "AzureADMyOrg",
+      "redirectUris": [
+        "https://portaldecompras.empresa.local/callback"
+      ]
+    },
+    {
+      "displayName": "CRM Marketing",
+      "description": "Aplicacion interna: CRM Marketing",
+      "signInAudience": "AzureADMyOrg",
+      "redirectUris": [
+        "https://crmmarketing.empresa.local/callback"
+      ]
+    },
+    {
+      "displayName": "Gestion Legal",
+      "description": "Aplicacion interna: Gestion Legal",
+      "signInAudience": "AzureADMyOrg",
+      "redirectUris": [
+        "https://gestionlegal.empresa.local/callback"
+      ]
+    },
+    {
+      "displayName": "Dashboard Produccion",
+      "description": "Aplicacion interna: Dashboard Produccion",
+      "signInAudience": "AzureADMyOrg",
+      "redirectUris": [
+        "https://dashboardproduccion.empresa.local/callback"
+      ]
+    },
+    {
+      "displayName": "API Interna",
+      "description": "Aplicacion interna: API Interna",
+      "signInAudience": "AzureADMyOrg",
+      "redirectUris": [
+        "https://apiinterna.empresa.local/callback"
+      ]
+    }
+  ],
+  "relaciones": [
+    {
+      "tipo": "membresia",
+      "usuario": "lucia.g@{tenant}",
+      "grupo": "Departamento de Ventas"
+    },
+    {
+      "tipo": "membresia",
+      "usuario": "javier.m@{tenant}",
+      "grupo": "Departamento de IT"
+    },
+    {
+      "tipo": "membresia",
+      "usuario": "maria.l@{tenant}",
+      "grupo": "Departamento de RRHH"
+    },
+    {
+      "tipo": "membresia",
+      "usuario": "carlos.s@{tenant}",
+      "grupo": "Departamento de Finanzas"
+    },
+    {
+      "tipo": "membresia",
+      "usuario": "elena.p@{tenant}",
+      "grupo": "Departamento de Produccion"
+    },
+    {
+      "tipo": "membresia",
+      "usuario": "pablo.g@{tenant}",
+      "grupo": "Departamento de Almacen"
+    },
+    {
+      "tipo": "membresia",
+      "usuario": "sara.f@{tenant}",
+      "grupo": "Departamento de Calidad"
+    },
+    {
+      "tipo": "membresia",
+      "usuario": "alberto.r@{tenant}",
+      "grupo": "Departamento de Compras"
+    },
+    {
+      "tipo": "membresia",
+      "usuario": "carmen.d@{tenant}",
+      "grupo": "Departamento de Marketing"
+    },
+    {
+      "tipo": "membresia",
+      "usuario": "david.m@{tenant}",
+      "grupo": "Departamento de Legal"
+    }
+  ],
+  "vulnerabilidad": "escenarioej3_sp_owner"
+}

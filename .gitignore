@@ -1,0 +1,76 @@
+# ============================================================
+# SECRETOS Y SEMILLAS LOCALES (NUNCA SUBIR A GIT)
+# ============================================================
+# Semillas locales por escenario. De ellas se derivan las contraseñas
+# de los usuarios. Si se filtran, se pueden reproducir las contraseñas.
+escenarios/.secrets/
+*.seed
+
+# ============================================================
+# MANIFIESTOS Y LOGS DE EJECUCIÓN
+# ============================================================
+# El manifiesto contiene UPNs y nombres de objetos del tenant.
+# No debe versionarse: es estado de ejecución, no código.
+manifiesto_lab*.json
+*_procesado_*.json
+
+# Logs de creación y limpieza
+log_*.csv
+log_cleanup_*.csv
+log_personalizada_*.csv
+
+# ============================================================
+# CONFIGURACIÓN LOCAL DEL MENÚ
+# ============================================================
+# menu_config.json es estado local del operador (Verbose, etc.).
+# No debe versionarse.
+menu_config.json
+
+# ============================================================
+# BIBLIOTECA GENERADA
+# ============================================================
+# biblioteca.json se regenera con generar_biblioteca.ps1.
+# No contiene secretos, pero es artefacto de generación.
+biblioteca.json
+
+# ============================================================
+# ESCENARIOS GENERADOS (OPCIONAL)
+# ============================================================
+# Si quieres versionar los escenarios de ejemplo (sin secretos),
+# deja las dos líneas siguientes comentadas. Si prefieres que cada
+# operador los genere en local con generar_biblioteca.ps1,
+# descoméntalas.
+# escenarios/escenario/
+# escenarios/vulnerab/
+
+# ============================================================
+# OTROS ARTEFACTOS DE EJECUCIÓN
+# ============================================================
+# Logs y temporales de PowerShell
+*.log
+*.tmp
+*.bak
+
+# ============================================================
+# ENTORNOS DE DESARROLLO
+# ============================================================
+# VS Code
+.vscode/
+
+# Visual Studio
+.vs/
+*.user
+*.suo
+
+# ============================================================
+# SISTEMA OPERATIVO
+# ============================================================
+# Windows
+Thumbs.db
+Desktop.ini
+
+# macOS
+.DS_Store
+
+# Linux
+*~

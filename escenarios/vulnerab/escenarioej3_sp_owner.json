@@ -1,10 +1,10 @@
-﻿{
-    "nombre":  "escenarioej3_sp_owner",
-    "descripcion":  "Owner de SP para el escenario 3.",
-    "tipo":  "ServicePrincipalOwner",
-    "parametros":  {
-                       "usuario":  "jorge.l@{tenant}",
-                       "aplicacion":  "Panel de Analisis Comercial"
-                   },
-    "requiereLicencia":  "Free"
+{
+  "nombre": "escenarioej3_sp_owner",
+  "descripcion": "Owner de SP para el escenario 3.",
+  "tipo": "ServicePrincipalOwner",
+  "parametros": {
+    "usuario": "lucia.g@{tenant}",
+    "aplicacion": "Panel de Analisis Comercial"
+  },
+  "requiereLicencia": "Free"
 }

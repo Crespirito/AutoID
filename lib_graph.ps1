@@ -18,10 +18,10 @@
     - AdministrativeUnit.ReadWrite.All: Crear y gestionar Administrative Units.
       Son el mecanismo de Entra ID más cercano a las OUs de AD on-prem.
       Permite agrupar usuarios/grupos y asignar administradores con alcance limitado.
-      Crear la AU es posible en Free; asignar roles scoped requiere P1 [citation:1][citation:5].
+      Crear la AU es posible en Free; asignar roles scoped requiere P1.
     - RoleManagement.ReadWrite.Directory: Gestionar PIM (roles elegibles).
       Permite crear asignaciones elegibles, que modelan los privilegios
-      acumulados y no permanentes típicos de REDIL [citation:6][citation:22].
+      acumulados y no permanentes típicos de REDIL.
 #>
 
 # ============================================================
@@ -29,17 +29,17 @@
 # ============================================================
 # Base Free (siempre presentes)
 $script:LabGraphScopesFree = @(
-    "User.ReadWrite.All",
-    "Group.ReadWrite.All",
-    "Application.ReadWrite.All",
-    "AppRoleAssignment.ReadWrite.All",
-    "Directory.Read.All"
+    'User.ReadWrite.All',
+    'Group.ReadWrite.All',
+    'Application.ReadWrite.All',
+    'AppRoleAssignment.ReadWrite.All',
+    'Directory.Read.All'
 )
 
 # Mecanismos para acercarse a REDIL (pueden requerir P1/P2)
 $script:LabGraphScopesExtended = @(
-    "AdministrativeUnit.ReadWrite.All",
-    "RoleManagement.ReadWrite.Directory"
+    'AdministrativeUnit.ReadWrite.All',
+    'RoleManagement.ReadWrite.Directory'
 )
 
 # Scopes activos por defecto: Free + Extended
@@ -91,7 +91,7 @@ function Get-LabGraphStatus {
     return [pscustomobject]@{
         Account  = $ctx.Account
         TenantId = $ctx.TenantId
-        Scopes   = ($ctx.Scopes -join ", ")
+        Scopes   = ($ctx.Scopes -join ', ')
     }
 }
 
@@ -104,11 +104,11 @@ function Install-LabGraphModule {
         return $true
     }
 
-    Write-LabWarn "Módulo Microsoft.Graph no encontrado. Instalando desde PSGallery (puede tardar)..."
+    Write-LabWarn 'Módulo Microsoft.Graph no encontrado. Instalando desde PSGallery (puede tardar)...'
 
     try {
         Install-Module -Name Microsoft.Graph -Scope CurrentUser -Repository PSGallery -Force -ErrorAction Stop
-        Write-LabOk "Módulo Microsoft.Graph instalado."
+        Write-LabOk 'Módulo Microsoft.Graph instalado.'
         return $true
     } catch {
         Write-LabError "No se pudo instalar Microsoft.Graph: $($_.Exception.Message)"
@@ -134,7 +134,7 @@ function Connect-LabGraph {
 
     # Si ya hay sesión, no reconectar
     if (Test-LabGraphSession) {
-        Write-LabInfo "Ya hay una sesión de Graph activa. Reutilizándola."
+        Write-LabInfo 'Ya hay una sesión de Graph activa. Reutilizándola.'
         return $true
     }
 
@@ -162,18 +162,18 @@ function Connect-LabGraph {
         }
         if ($TenantId) { $params.TenantId = $TenantId }
 
-        Connect-MgGraph @params -ErrorAction Stop
+        $null = Connect-MgGraph @params -ErrorAction Stop
     } catch {
         Write-LabError "Fallo al conectar con Microsoft Graph: $($_.Exception.Message)"
         if (-not $SoloFree) {
-            Write-LabWarn "Si el tenant no soporta los scopes extendidos, prueba con -SoloFree."
+            Write-LabWarn 'Si el tenant no soporta los scopes extendidos, prueba con -SoloFree.'
         }
         return $false
     }
 
     # Verificar que la conexión ha tenido efecto
     if (-not (Test-LabGraphSession)) {
-        Write-LabError "La conexión se ejecutó pero no hay sesión válida."
+        Write-LabError 'La conexión se ejecutó pero no hay sesión válida.'
         return $false
     }
 
@@ -192,8 +192,8 @@ function Disconnect-LabGraph {
     }
 
     try {
-        Disconnect-MgGraph -ErrorAction Stop | Out-Null
-        Write-LabInfo "Sesión de Microsoft Graph cerrada."
+        $null = Disconnect-MgGraph -ErrorAction Stop
+        Write-LabInfo 'Sesión de Microsoft Graph cerrada.'
     } catch {
         Write-LabWarn "No se pudo cerrar la sesión limpiamente: $($_.Exception.Message)"
     }
@@ -203,16 +203,18 @@ function Invoke-LabGraphWithRetry {
     <#
     .SYNOPSIS
         Ejecuta un bloque de código asegurando sesión activa.
+    .PARAMETER ScriptBlock
+        Bloque de código a ejecutar con sesión garantizada.
     #>
     param(
-        [Parameter(Mandatory=$true)]
+        [Parameter(Mandatory = $true)]
         [scriptblock]$ScriptBlock
     )
 
     if (-not (Test-LabGraphSession)) {
-        Write-LabWarn "Sesión de Graph expirada o inexistente. Reconectando..."
+        Write-LabWarn 'Sesión de Graph expirada o inexistente. Reconectando...'
         if (-not (Connect-LabGraph)) {
-            Write-LabError "No se pudo reconectar. Operación cancelada."
+            Write-LabError 'No se pudo reconectar. Operación cancelada.'
             return $null
         }
     }

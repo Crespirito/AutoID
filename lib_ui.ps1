@@ -11,6 +11,13 @@
 .NOTES
     Sin dependencias. Se carga por dot-sourcing.
     El resto de librerías y scripts asumen que estas funciones existen.
+
+    SOBRE PSAvoidUsingWriteHost:
+    Este archivo es el wrapper de UI del laboratorio. El uso de
+    Write-Host es INTENCIONAL: es la capa que traduce los mensajes
+    del dominio (info, ok, warn, error) a salida de consola con color.
+    Las reglas de PSScriptAnalyzer sobre Write-Host se pueden suprimir
+    para este archivo sin afectar al resto del proyecto.
 #>
 
 # ============================================================
@@ -36,17 +43,17 @@ function Wait-LabKey {
         Texto mostrado antes de la pausa.
     #>
     param(
-        [string]$Mensaje = "Pulsa cualquier tecla para continuar..."
+        [string]$Mensaje = 'Pulsa cualquier tecla para continuar...'
     )
 
-    Write-Host ""
+    Write-Host ''
     Write-Host $Mensaje -ForegroundColor Gray
 
     try {
-        $null = $Host.UI.RawUI.ReadKey("NoEcho,IncludeKeyDown")
+        $null = $Host.UI.RawUI.ReadKey('NoEcho,IncludeKeyDown')
     } catch {
         # Fallback para hosts sin RawUI (ISE, VS Code terminal en algunos casos)
-        $null = Read-Host "(Enter para continuar)"
+        $null = Read-Host '(Enter para continuar)'
     }
 }
 
@@ -62,14 +69,14 @@ function Show-LabHeader {
         Título a mostrar. Por defecto, el genérico del laboratorio.
     #>
     param(
-        [string]$Titulo = "GESTOR DE ENTORNOS DE LABORATORIO - ENTRA ID (FREE)"
+        [string]$Titulo = 'GESTOR DE ENTORNOS DE LABORATORIO - ENTRA ID (FREE)'
     )
 
     Clear-LabScreen
-    Write-Host "============================================================" -ForegroundColor Cyan
-    Write-Host ("    " + $Titulo).PadRight(60) -ForegroundColor Cyan
-    Write-Host "============================================================" -ForegroundColor Cyan
-    Write-Host ""
+    Write-Host '============================================================' -ForegroundColor Cyan
+    Write-Host ('    ' + $Titulo).PadRight(60) -ForegroundColor Cyan
+    Write-Host '============================================================' -ForegroundColor Cyan
+    Write-Host ''
 }
 
 function Show-LabBanner {
@@ -83,9 +90,9 @@ function Show-LabBanner {
         [string]$Texto
     )
 
-    Write-Host ""
+    Write-Host ''
     Write-Host "--- $Texto ---" -ForegroundColor Cyan
-    Write-Host ""
+    Write-Host ''
 }
 
 # ============================================================
@@ -96,6 +103,8 @@ function Write-LabInfo {
     <#
     .SYNOPSIS
         Mensaje informativo (gris).
+    .PARAMETER Msg
+        Texto del mensaje.
     #>
     param([string]$Msg)
     Write-Host "[INFO]  $Msg" -ForegroundColor Gray
@@ -105,6 +114,8 @@ function Write-LabOk {
     <#
     .SYNOPSIS
         Mensaje de éxito (verde).
+    .PARAMETER Msg
+        Texto del mensaje.
     #>
     param([string]$Msg)
     Write-Host "[OK]    $Msg" -ForegroundColor Green
@@ -114,6 +125,8 @@ function Write-LabWarn {
     <#
     .SYNOPSIS
         Mensaje de aviso (amarillo).
+    .PARAMETER Msg
+        Texto del mensaje.
     #>
     param([string]$Msg)
     Write-Host "[WARN]  $Msg" -ForegroundColor Yellow
@@ -123,6 +136,8 @@ function Write-LabError {
     <#
     .SYNOPSIS
         Mensaje de error (rojo).
+    .PARAMETER Msg
+        Texto del mensaje.
     #>
     param([string]$Msg)
     Write-Host "[ERROR] $Msg" -ForegroundColor Red
@@ -142,10 +157,10 @@ function Read-LabConfirm {
         $true si el usuario escribió exactamente 'SI', $false en caso contrario.
     #>
     param(
-        [string]$Mensaje = "¿Quieres continuar?"
+        [string]$Mensaje = '¿Quieres continuar?'
     )
 
     Write-Host $Mensaje -ForegroundColor Yellow
     $resp = Read-Host "Escribe 'SI' para confirmar"
-    return ($resp -eq "SI")
+    return ($resp -eq 'SI')
 }
