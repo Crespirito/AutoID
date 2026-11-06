@@ -1,0 +1,14 @@
+{
+  "nombre": "mixto",
+  "descripcion": "Todas las secciones disponibles en Free.",
+  "version": "1.0",
+  "usuarios": [],
+  "grupos": [],
+  "relaciones": [],
+  "aplicaciones": [],
+  "appRoles": [],
+  "credencialesApp": [],
+  "permisosApi": [],
+  "invitados": [],
+  "vulnerabilidades": []
+}

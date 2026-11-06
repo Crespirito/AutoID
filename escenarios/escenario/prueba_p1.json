@@ -1,0 +1,68 @@
+{
+  "nombre": "prueba_p1",
+  "descripcion": "Escenario P1: AU, grupos dinamicos, role-assignable, licencia, CA y TAP.",
+  "version": "1.0",
+  "usuarios": [
+    {
+      "displayName": "Lucia Garcia",
+      "upn": "lucia.g@{tenant}",
+      "mailNickname": "lucia.g"
+    }
+  ],
+  "grupos": [
+    {
+      "displayName": "Departamento de Ventas",
+      "description": "Usuarios del departamento de Ventas",
+      "mailNickname": "departamento-ventas"
+    }
+  ],
+  "administrativeUnits": [
+    {
+      "displayName": "AU Ventas",
+      "description": "Unidad administrativa de Ventas",
+      "members": [ "lucia.g@{tenant}", "Departamento de Ventas" ],
+      "roles": []
+    }
+  ],
+  "gruposDinamicos": [
+    {
+      "displayName": "Dinamico Guests",
+      "description": "Grupo dinamico de invitados",
+      "membershipRule": "(user.userType -eq \"Guest\")",
+      "processingState": "On"
+    }
+  ],
+  "gruposRoleAssignable": [
+    {
+      "displayName": "RoleAssignable Ventas",
+      "description": "Grupo con asignacion de roles"
+    }
+  ],
+  "licencias": [
+    {
+      "usuario": "lucia.g@{tenant}",
+      "skuPartNumber": "ENTERPRISEPACK"
+    }
+  ],
+  "accesoCondicional": [
+    {
+      "displayName": "CA MFA para admins",
+      "state": "disabled",
+      "conditions": {
+        "users": { "includeRoles": [ "62e90394-69f5-4237-9190-012177145e10" ] },
+        "applications": { "includeApplications": [ "All" ] }
+      },
+      "grantControls": {
+        "operator": "OR",
+        "builtInControls": [ "mfa" ]
+      }
+    }
+  ],
+  "metodosAuth": [
+    {
+      "usuario": "lucia.g@{tenant}",
+      "lifetimeInMinutes": 60,
+      "isUsableOnce": true
+    }
+  ]
+}

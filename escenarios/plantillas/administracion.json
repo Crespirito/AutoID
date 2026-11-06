@@ -1,0 +1,10 @@
+{
+  "nombre": "administracion",
+  "descripcion": "Unidades administrativas, grupos dinamicos y role-assignable.",
+  "version": "1.0",
+  "usuarios": [],
+  "grupos": [],
+  "administrativeUnits": [],
+  "gruposDinamicos": [],
+  "gruposRoleAssignable": []
+}

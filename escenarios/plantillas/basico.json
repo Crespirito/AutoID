@@ -1,0 +1,8 @@
+{
+  "nombre": "basico",
+  "descripcion": "Usuarios, grupos y relaciones basicas.",
+  "version": "1.0",
+  "usuarios": [],
+  "grupos": [],
+  "relaciones": []
+}

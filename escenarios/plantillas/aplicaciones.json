@@ -1,0 +1,10 @@
+{
+  "nombre": "aplicaciones",
+  "descripcion": "Usuarios, aplicaciones, roles, credenciales y permisos de API.",
+  "version": "1.0",
+  "usuarios": [],
+  "aplicaciones": [],
+  "appRoles": [],
+  "credencialesApp": [],
+  "permisosApi": []
+}

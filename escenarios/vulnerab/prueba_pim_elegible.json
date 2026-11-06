@@ -1,0 +1,11 @@
+{
+  "nombre": "prueba_pim_eligible",
+  "descripcion": "Rol elegible PIM asignado a un usuario.",
+  "tipo": "PimEligibleRole",
+  "parametros": {
+    "usuario": "lucia.g@{tenant}",
+    "rol": "User Administrator",
+    "duracion": "PT8H"
+  },
+  "requiereLicencia": "P2"
+}

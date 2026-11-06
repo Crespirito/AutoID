@@ -1,0 +1,37 @@
+{
+  "nombre": "prueba_vulnerabilidad",
+  "descripcion": "Escenario con vulnerabilidad ServicePrincipalOwner.",
+  "version": "1.0",
+  "usuarios": [
+    {
+      "displayName": "Lucia Garcia",
+      "upn": "lucia.g@{tenant}",
+      "mailNickname": "lucia.g"
+    }
+  ],
+  "grupos": [
+    {
+      "displayName": "Departamento de Ventas",
+      "description": "Usuarios del departamento de Ventas",
+      "mailNickname": "departamento-ventas"
+    }
+  ],
+  "aplicaciones": [
+    {
+      "displayName": "Panel de Analisis Comercial",
+      "description": "Aplicacion interna",
+      "signInAudience": "AzureADMyOrg",
+      "redirectUris": [ "https://panel.empresa.local/callback" ]
+    }
+  ],
+  "vulnerabilidades": [
+    {
+      "nombre": "prueba_sp_owner",
+      "tipo": "ServicePrincipalOwner",
+      "parametros": {
+        "usuario": "lucia.g@{tenant}",
+        "aplicacion": "Panel de Analisis Comercial"
+      }
+    }
+  ]
+}

@@ -1,0 +1,21 @@
+{
+  "nombre": "prueba_minimo",
+  "descripcion": "Escenario mínimo: un usuario y un grupo.",
+  "version": "1.0",
+  "usuarios": [
+    {
+      "displayName": "Lucia Garcia",
+      "upn": "lucia.g@{tenant}",
+      "mailNickname": "lucia.g",
+      "department": "Ventas",
+      "jobTitle": "Comercial"
+    }
+  ],
+  "grupos": [
+    {
+      "displayName": "Departamento de Ventas",
+      "description": "Usuarios del departamento de Ventas",
+      "mailNickname": "departamento-ventas"
+    }
+  ]
+}

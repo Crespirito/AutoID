@@ -1,0 +1,6 @@
+{
+  "nombre": "invitados",
+  "descripcion": "Usuarios invitados (B2B).",
+  "version": "1.0",
+  "invitados": []
+}

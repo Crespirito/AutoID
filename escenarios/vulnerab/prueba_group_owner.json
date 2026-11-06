@@ -1,0 +1,10 @@
+{
+  "nombre": "prueba_group_owner",
+  "descripcion": "Usuario owner de un grupo de seguridad.",
+  "tipo": "GroupOwner",
+  "parametros": {
+    "usuario": "lucia.g@{tenant}",
+    "grupo": "Departamento de Ventas"
+  },
+  "requiereLicencia": "Free"
+}

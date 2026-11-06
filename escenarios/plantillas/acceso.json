@@ -1,0 +1,7 @@
+{
+  "nombre": "acceso",
+  "descripcion": "Acceso Condicional y metodos de autenticacion.",
+  "version": "1.0",
+  "accesoCondicional": [],
+  "metodosAuth": []
+}
