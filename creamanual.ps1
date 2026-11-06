@@ -1,33 +1,32 @@
 <#
 .SYNOPSIS
-    Creación personalizada de entorno de laboratorio en Entra ID (Free).
+    Creación manual de entorno de laboratorio en Entra ID.
 .DESCRIPTION
-    Permite al usuario elegir qué objetos crear (usuarios, grupos,
-    aplicaciones y service principals) y los va construyendo
-    interactivamente. Al final guarda el manifiesto para que
-    clean_up.ps1 pueda eliminarlos después.
+    Construcción interactiva de un escenario a medida. El menú se genera
+    dinámicamente a partir de las capacidades disponibles (filtradas por
+    nivel y TestDisponible).
 
-    GESTIÓN DE CONTRASEÑAS:
-    Para cada usuario, el operador puede:
-      - Introducir la contraseña manualmente (Read-Host -AsSecureString),
-      - o dejar que se derive automáticamente de la semilla local del
-        escenario manual (HMAC-SHA256(semilla, UPN)).
-    En ningún caso se guarda la contraseña en el manifiesto ni se imprime
-    en el resumen final. Si se elige generación automática, la contraseña
-    se muestra UNA SOLA VEZ en el momento de crearla.
+    Funcionalidades:
+      - Añadir objetos de cualquier capacidad disponible.
+      - Borrar objetos locales (sin tocar el tenant).
+      - Listar el estado actual del escenario.
+      - Guardar el manifiesto y finalizar.
+      - Exportar el escenario construido como JSON reutilizable.
+      - Cargar un escenario existente para ampliarlo.
 
-    La sesión de Microsoft Graph la gestiona menu.ps1. Este script NO
-    conecta ni desconecta; solo verifica que hay sesión activa y falla
-    con código 1 si no la hay.
+    CONTRASEÑAS:
+    Para cada usuario, el operador puede introducir la contraseña manualmente
+    o generarla desde la semilla de la sesión manual. En ningún caso se
+    guarda la contraseña en el manifiesto ni en el JSON exportado.
 
-    NOTA: es un esqueleto. La creación de objetos está implementada,
-    pero las decisiones de escenario (qué usuarios, qué grupos, qué
-    vulnerabilidad inyectar) son tuyas. Aquí solo se demuestra el flujo.
+    La sesión de Graph la gestiona menu.ps1. Este script NO conecta ni
+    desconecta; solo verifica que hay sesión activa.
 .NOTES
-    Depende de lib_ui.ps1 y lib_manifiesto.ps1.
+    Depende de lib_ui.ps1, lib_graph.ps1, lib_config.ps1,
+    lib_manifiesto.ps1, lib_escenarios.ps1, lib_niveles.ps1,
+    lib_caps.ps1, lib_creadores.ps1.
 #>
 #Requires -Version 5.1
-#Requires -Modules Microsoft.Graph.Authentication, Microsoft.Graph.Applications, Microsoft.Graph.Users, Microsoft.Graph.Groups, Microsoft.Graph.Identity.DirectoryManagement
 
 [CmdletBinding()]
 param()
@@ -39,85 +38,45 @@ $ErrorActionPreference = 'Stop'
 # CARGA DE LIBRERÍAS
 # ============================================================
 . (Join-Path $PSScriptRoot 'lib_ui.ps1')
+. (Join-Path $PSScriptRoot 'lib_graph.ps1')
+. (Join-Path $PSScriptRoot 'lib_config.ps1')
 . (Join-Path $PSScriptRoot 'lib_manifiesto.ps1')
 . (Join-Path $PSScriptRoot 'lib_escenarios.ps1')
+. (Join-Path $PSScriptRoot 'lib_niveles.ps1')
+. (Join-Path $PSScriptRoot 'lib_caps.ps1')
+. (Join-Path $PSScriptRoot 'lib_creadores.ps1')
 
 # ============================================================
-# VERIFICACIÓN DE SESIÓN (gestionada por el menú)
+# VERIFICACIÓN DE SESIÓN
 # ============================================================
-if (-not (Get-MgContext -ErrorAction SilentlyContinue)) {
+if (-not (Test-LabGraphSession)) {
     Write-LabError 'No hay sesión de Graph activa. Ejecuta este script desde menu.ps1.'
     exit 1
 }
 
 # ============================================================
-# FASE 0: LOG Y MANIFIESTO
+# ESTADO Y CONFIGURACIÓN
 # ============================================================
-$log = [System.Collections.Generic.List[object]]::new()
-
-function Add-LogEntry {
-    <#
-    .SYNOPSIS
-        Añade una entrada al log interno y la muestra por consola.
-    #>
-    param(
-        [Parameter(Mandatory = $true)]
-        [string]$Categoria,
-
-        [Parameter(Mandatory = $true)]
-        [string]$Mensaje,
-
-        [Parameter(Mandatory = $false)]
-        [object]$Detalle = $null
-    )
-
-    $log.Add([pscustomobject]@{
-        Timestamp = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'
-        Categoria = $Categoria
-        Mensaje   = $Mensaje
-        Detalle   = $Detalle
-    })
-
-    switch ($Categoria) {
-        'Error'   { Write-LabError $Mensaje }
-        'Warning' { Write-LabWarn  $Mensaje }
-        default   { Write-LabInfo  $Mensaje }
-    }
-}
-
-$manifiesto = New-LabManifiestoVacio
+$config = Get-LabConfig
+$nivel = Get-LabNivelActual -Config $config
+$null = Initialize-LabCapacidades -Root (Join-Path $PSScriptRoot 'lib_caps')
 
 # ============================================================
-# GESTIÓN DE SEMILLA Y DERIVACIÓN DE CONTRASEÑAS
+# SEMILLA DE LA SESIÓN MANUAL
 # ============================================================
-# La semilla vive en escenarios/.secrets/<nombre>.seed, fuera de Git.
-# En creamanual se usa una semilla por sesión de creación manual.
 
 function Get-LabSecretsDir {
     <#
     .SYNOPSIS
-        Devuelve la ruta de la carpeta de secretos locales (fuera de Git).
+        Devuelve la ruta de la carpeta de secretos locales.
     #>
-    $escenariosRoot = Split-Path -Path (Get-LabEscenariosPath) -Parent
-    return (Join-Path $escenariosRoot '.secrets')
-}
-
-function Get-LabSeedPath {
-    <#
-    .SYNOPSIS
-        Devuelve la ruta del fichero de semilla para un nombre dado.
-    #>
-    param(
-        [Parameter(Mandatory = $true)]
-        [string]$NombreEscenario
-    )
-    return (Join-Path (Get-LabSecretsDir) "$NombreEscenario.seed")
+    return (Join-Path $PSScriptRoot 'escenarios/.secrets')
 }
 
 function Get-LabSeed {
     <#
     .SYNOPSIS
-        Obtiene la semilla de un escenario. Si no existe, la genera y la guarda.
+        Obtiene o genera la semilla de un escenario.
     .OUTPUTS
         Byte[] con la semilla.
     #>
@@ -126,8 +85,8 @@ function Get-LabSeed {
         [string]$NombreEscenario
     )
 
-    $seedPath = Get-LabSeedPath -NombreEscenario $NombreEscenario
-    $seedDir  = Split-Path -Path $seedPath -Parent
+    $seedPath = Join-Path (Get-LabSecretsDir) "$NombreEscenario.seed"
+    $seedDir = Split-Path -Path $seedPath -Parent
 
     if (-not (Test-Path -Path $seedDir)) {
         $null = New-Item -ItemType Directory -Path $seedDir -Force
@@ -140,11 +99,7 @@ function Get-LabSeed {
 
     $bytes = New-Object byte[] 32
     $rng = [System.Security.Cryptography.RandomNumberGenerator]::Create()
-    try {
-        $rng.GetBytes($bytes)
-    } finally {
-        $rng.Dispose()
-    }
+    try { $rng.GetBytes($bytes) } finally { $rng.Dispose() }
 
     $b64 = [Convert]::ToBase64String($bytes)
     Set-Content -Path $seedPath -Value $b64 -Encoding UTF8 -Force
@@ -173,15 +128,10 @@ function New-LabPasswordFromSeed {
     <#
     .SYNOPSIS
         Deriva una contraseña determinista a partir de la semilla y el UPN.
-    .OUTPUTS
-        String con la contraseña derivada.
     #>
     param(
-        [Parameter(Mandatory = $true)]
-        [byte[]]$Semilla,
-
-        [Parameter(Mandatory = $true)]
-        [string]$Upn
+        [Parameter(Mandatory = $true)] [byte[]]$Semilla,
+        [Parameter(Mandatory = $true)] [string]$Upn
     )
 
     $hmac = New-Object System.Security.Cryptography.HMACSHA256
@@ -197,548 +147,320 @@ function New-LabPasswordFromSeed {
     return "$core!Aa1"
 }
 
-function ConvertTo-LabPlainText {
+# ============================================================
+# CARGA O CREACIÓN DE ESCENARIO
+# ============================================================
+
+function Select-LabEscenarioInicial {
     <#
     .SYNOPSIS
-        Convierte una SecureString a texto plano solo en memoria, para pasarla a Graph.
+        Pregunta al operador si quiere cargar un escenario existente o empezar de cero.
+    .OUTPUTS
+        PSCustomObject normalizado (nuevo o cargado).
+    #>
+    Show-LabHeader -Titulo 'CREACION MANUAL - INICIO'
+
+    Write-Host '  [1] Empezar de cero'
+    Write-Host '  [2] Cargar un escenario existente'
+    Write-Host ''
+
+    $op = Read-Host 'Selecciona una opción'
+
+    if ($op -eq '2') {
+        $escenarios = Get-LabEscenariosDisponibles
+        if ($escenarios.Count -eq 0) {
+            Write-LabWarn 'No hay escenarios disponibles. Se empieza de cero.'
+            return (ConvertTo-LabEscenarioNormalizado -Raw ([pscustomobject]@{}))
+        }
+
+        Write-Host ''
+        Write-Host '  Escenarios disponibles:' -ForegroundColor Cyan
+        for ($i = 0; $i -lt $escenarios.Count; $i++) {
+            Write-Host ('    [{0}] {1}' -f $i, $escenarios[$i])
+        }
+        $sel = Read-Host 'Selecciona un escenario'
+        if ($sel -match '^\d+$' -and [int]$sel -lt $escenarios.Count) {
+            $path = Join-Path (Get-LabEscenariosPath) "$($escenarios[[int]$sel]).json"
+            return (ConvertTo-LabEscenarioNormalizado -Path $path)
+        }
+    }
+
+    return (ConvertTo-LabEscenarioNormalizado -Raw ([pscustomobject]@{}))
+}
+
+# ============================================================
+# MENÚ GENERADO DESDE CAPACIDADES
+# ============================================================
+
+function Show-LabMenuCapacidades {
+    <#
+    .SYNOPSIS
+        Muestra las capacidades disponibles y devuelve la seleccionada.
     #>
     param(
-        [Parameter(Mandatory = $true)]
-        [System.Security.SecureString]$SecureString
+        [Parameter(Mandatory = $true)] [string]$Nivel,
+        [Parameter(Mandatory = $true)] [hashtable]$Contexto
     )
 
-    $bstr = [System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($SecureString)
-    try {
-        return [System.Runtime.InteropServices.Marshal]::PtrToStringBSTR($bstr)
-    } finally {
-        [System.Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr)
+    $capacidades = Get-LabCapacidades -Nivel $Nivel -SoloDisponibles -Contexto $Contexto
+    if ($capacidades.Count -eq 0) {
+        Write-LabWarn 'No hay capacidades disponibles para el nivel actual.'
+        return $null
     }
+
+    Show-LabHeader -Titulo 'CREACION MANUAL - AÑADIR OBJETOS'
+
+    for ($i = 0; $i -lt $capacidades.Count; $i++) {
+        $cap = $capacidades[$i]
+        $nombre = if ($cap.ContainsKey('Descripcion') -and $cap.Descripcion) { $cap.Descripcion } else { $cap.Nombre }
+        Write-Host ('  [{0}] {1}' -f $i, $nombre)
+    }
+    Write-Host ''
+
+    $sel = Read-Host 'Selecciona una capacidad (Enter para volver)'
+    if ([string]::IsNullOrWhiteSpace($sel)) { return $null }
+    if (-not ($sel -match '^\d+$') -or [int]$sel -ge $capacidades.Count) {
+        Write-LabWarn 'Selección inválida.'
+        return $null
+    }
+    return $capacidades[[int]$sel]
 }
 
 # ============================================================
-# INFORMACIÓN DEL TENANT
+# ESTADO Y BORRADO LOCAL
 # ============================================================
-Write-LabBanner 'Obteniendo informacion del tenant'
 
-try {
-    $Organization = Get-MgOrganization -ErrorAction Stop
-    $TenantDomain = ($Organization.VerifiedDomains | Where-Object IsDefault).Name
+function Show-LabEstadoEscenario {
+    <#
+    .SYNOPSIS
+        Muestra el estado actual del escenario en construcción.
+    #>
+    param(
+        [Parameter(Mandatory = $true)] [object]$Escenario
+    )
 
-    $context = Get-MgContext
-    $manifiesto.TenantId     = $context.TenantId
-    $manifiesto.TenantDomain = $TenantDomain
+    Show-LabHeader -Titulo 'ESTADO DEL ESCENARIO'
 
-    Add-LogEntry -Categoria 'Info' -Mensaje 'Informacion del tenant obtenida.' -Detalle @{
-        Tenant = $TenantDomain
-        Id     = $context.TenantId
+    $total = 0
+    foreach ($nombreCap in $Escenario.Secciones.Keys) {
+        $def = @($Escenario.Secciones[$nombreCap])
+        if ($def.Count -eq 0) { continue }
+        $cap = Get-LabCapacidad -Nombre $nombreCap
+        $nombreVisible = if ($cap -and $cap.ContainsKey('Descripcion') -and $cap.Descripcion) { $cap.Descripcion } else { $nombreCap }
+        Write-Host "  ${nombreVisible}: $($def.Count)" -ForegroundColor Cyan
+        $total += $def.Count
     }
-} catch {
-    Add-LogEntry -Categoria 'Error' -Mensaje 'No se pudo obtener informacion del tenant.' -Detalle $_.Exception.Message
-    exit 1
+
+    if ($total -eq 0) {
+        Write-Host '  (escenario vacío)' -ForegroundColor DarkGray
+    }
+    Write-Host ''
+}
+
+function Invoke-BorrarObjetoLocal {
+    <#
+    .SYNOPSIS
+        Borra un objeto del escenario en construcción (solo local).
+    #>
+    param(
+        [Parameter(Mandatory = $true)] [object]$Escenario
+    )
+
+    Show-LabHeader -Titulo 'BORRAR OBJETO LOCAL'
+
+    $seccionesConDef = @()
+    foreach ($nombreCap in $Escenario.Secciones.Keys) {
+        $def = @($Escenario.Secciones[$nombreCap])
+        if ($def.Count -gt 0) {
+            $seccionesConDef += [pscustomobject]@{ NombreCap = $nombreCap; Def = $def }
+        }
+    }
+
+    if ($seccionesConDef.Count -eq 0) {
+        Write-LabWarn 'El escenario está vacío.'
+        return
+    }
+
+    for ($i = 0; $i -lt $seccionesConDef.Count; $i++) {
+        $s = $seccionesConDef[$i]
+        Write-Host ('  [{0}] {1} ({2} objetos)' -f $i, $s.NombreCap, $s.Def.Count)
+    }
+    Write-Host ''
+
+    $sel = Read-Host 'Selecciona una sección (Enter para cancelar)'
+    if ([string]::IsNullOrWhiteSpace($sel)) { return }
+    if (-not ($sel -match '^\d+$') -or [int]$sel -ge $seccionesConDef.Count) {
+        Write-LabWarn 'Selección inválida.'
+        return
+    }
+
+    $seccion = $seccionesConDef[[int]$sel]
+    for ($j = 0; $j -lt $seccion.Def.Count; $j++) {
+        $o = $seccion.Def[$j]
+        $desc = $o | ConvertTo-Json -Compress
+        Write-Host ('    [{0}] {1}' -f $j, $desc)
+    }
+    $selObj = Read-Host 'Selecciona el objeto a borrar (Enter para cancelar)'
+    if ([string]::IsNullOrWhiteSpace($selObj)) { return }
+    if (-not ($selObj -match '^\d+$') -or [int]$selObj -ge $seccion.Def.Count) {
+        Write-LabWarn 'Selección inválida.'
+        return
+    }
+
+    $nuevaLista = @()
+    for ($k = 0; $k -lt $seccion.Def.Count; $k++) {
+        if ($k -ne [int]$selObj) { $nuevaLista += $seccion.Def[$k] }
+    }
+    $Escenario.Secciones[$seccion.NombreCap] = $nuevaLista
+    Write-LabOk "Objeto borrado del escenario local. Nota: si ya se creó en el tenant, no se borra; solo se excluye del manifiesto."
 }
 
 # ============================================================
-# SEMILLA DE LA SESIÓN MANUAL
+# FLUJO PRINCIPAL
 # ============================================================
-# Cada sesión de creación manual tiene su propia semilla, para que las
-# contraseñas derivadas sean reproducibles conservando el fichero.
-$nombreSemillaManual = 'manual_' + (Get-Date -Format 'yyyyMMdd_HHmmss')
-$semillaManual = Get-LabSeed -NombreEscenario $nombreSemillaManual
 
-Write-LabInfo "Semilla de esta sesion manual: $nombreSemillaManual"
-Write-LabInfo 'Conserva esta semilla para reproducir las contrasenas generadas automaticamente.'
+# 1. Cargar o empezar de cero
+$esc = Select-LabEscenarioInicial
+$esc.Nombre = if ($esc.Nombre) { $esc.Nombre } else { 'manual_' + (Get-Date -Format 'yyyyMMdd_HHmmss') }
+
+# 2. Semilla de la sesión manual
+$nombreSemilla = 'manual_' + (Get-Date -Format 'yyyyMMdd_HHmmss')
+$semilla = Get-LabSeed -NombreEscenario $nombreSemilla
+Write-LabInfo "Semilla de esta sesión: $nombreSemilla"
+Write-LabInfo 'Conserva esta semilla para reproducir las contraseñas generadas automáticamente.'
 Write-Host ''
 
-# ============================================================
-# ESTADO LOCAL DEL ESCENARIO
-# ============================================================
-$Escenario = [ordered]@{
-    Usuarios     = [System.Collections.Generic.List[object]]::new()
-    Grupos       = [System.Collections.Generic.List[object]]::new()
-    Aplicaciones = [System.Collections.Generic.List[object]]::new()
-    Relaciones   = [System.Collections.Generic.List[object]]::new()
+# 3. Contexto para PreguntarUI y TestDisponible
+$ctx = @{
+    TenantId        = (Get-MgContext).TenantId
+    TenantDomain    = (Get-MgContext).TenantId
+    Nivel           = $nivel
+    Manifiesto      = $null
+    ObjetosCreados  = @{}
+    Config          = $config
+    SnapshotPreLab  = @{}
+    PasswordsPorUpn = @{}
+    DerivarPassword = {
+        param($upn)
+        return (New-LabPasswordFromSeed -Semilla $semilla -Upn $upn)
+    }.GetNewClosure()
+    Semilla         = $semilla
 }
 
-# ============================================================
-# FUNCIONES AUXILIARES DE CREACIÓN
-# ============================================================
+# 4. Bucle de construcción
+$salir = $false
+while (-not $salir) {
+    Show-LabHeader -Titulo 'CREACION MANUAL - CONSTRUCCION DEL ESCENARIO'
+    Show-LabEstadoEscenario -Escenario $esc
 
-function New-UsuarioInteractivo {
-    <#
-    .SYNOPSIS
-        Pide los datos de un usuario y lo crea. Permite introducir la
-        contraseña manualmente o generarla automáticamente desde la semilla.
-    #>
-    param(
-        [Parameter(Mandatory = $true)]
-        [string]$TenantDomain
-    )
-
-    Show-LabBanner 'Nuevo usuario'
-
-    $displayName = Read-Host '  DisplayName'
-    if ([string]::IsNullOrWhiteSpace($displayName)) {
-        Write-LabWarn 'DisplayName vacio. Cancelando.'
-        return $null
-    }
-
-    $nick = $displayName.ToLower() -replace '[^a-z0-9]', '.'
-    $upnDefault = "$nick@$TenantDomain"
-    $upn = Read-Host "  UPN [$upnDefault]"
-    if ([string]::IsNullOrWhiteSpace($upn)) { $upn = $upnDefault }
-
-    # --- Contraseña: manual o automática desde semilla ---
-    $passwordPlain = $null
-    $passwordGeneradaAuto = $false
-
+    Write-Host '  --- Añadir ---' -ForegroundColor Cyan
+    Write-Host '  [A] Añadir objeto (menú generado desde capacidades)'
     Write-Host ''
-    Write-Host '  Contrasena:' -ForegroundColor Cyan
-    Write-Host '    [1] Introducir manualmente (no se muestra en pantalla)'
-    Write-Host '    [2] Generar automaticamente desde la semilla'
-    $opPwd = Read-Host '  Opcion [1/2]'
-
-    switch ($opPwd) {
-        '2' {
-            $passwordPlain = New-LabPasswordFromSeed -Semilla $semillaManual -Upn $upn
-            $passwordGeneradaAuto = $true
-            Write-Host ''
-            Write-Host '  Contrasena generada (MOSTRAR UNA SOLA VEZ):' -ForegroundColor Yellow
-            Write-Host "    $passwordPlain" -ForegroundColor Gray
-            Write-Host '  Anotala. Se puede reproducir conservando la semilla.' -ForegroundColor Yellow
-            Write-Host ''
-        }
-        default {
-            $secure = Read-Host '  Password' -AsSecureString
-            if ($null -eq $secure -or $secure.Length -eq 0) {
-                Write-LabWarn 'Password vacia. Cancelando.'
-                return $null
-            }
-            $passwordPlain = ConvertTo-LabPlainText -SecureString $secure
-        }
-    }
-
-    $department = Read-Host '  Department (opcional)'
-    $jobTitle   = Read-Host '  JobTitle (opcional)'
-
-    # ¿Existe ya?
-    $existing = Get-MgUser -Filter "userPrincipalName eq '$upn'" -ErrorAction SilentlyContinue
-    if ($existing) {
-        if ($existing -is [array]) { $existing = $existing[0] }
-        Write-LabWarn "El usuario $upn ya existe. Se reutiliza y se actualiza su contrasena."
-        $user = $existing
-        if ($manifiesto.Usuarios -notcontains $upn) { $manifiesto.Usuarios += $upn }
-
-        $passwordProfile = @{
-            Password                      = $passwordPlain
-            ForceChangePasswordNextSignIn = $false
-        }
-        Update-MgUser -UserId $user.Id -PasswordProfile $passwordProfile -ErrorAction Stop
-    } else {
-        $params = @{
-            DisplayName       = $displayName
-            UserPrincipalName = $upn
-            MailNickname      = ($displayName -replace '[^a-zA-Z0-9]', '')
-            AccountEnabled    = $true
-            PasswordProfile   = @{
-                ForceChangePasswordNextSignIn = $false
-                Password                      = $passwordPlain
-            }
-        }
-        if ($department) { $params.Department = $department }
-        if ($jobTitle)   { $params.JobTitle   = $jobTitle }
-
-        $user = New-MgUser @params -ErrorAction Stop
-        if ($null -eq $user) {
-            Write-LabError "New-MgUser no devolvio objeto para $upn."
-            return $null
-        }
-        if ($user -is [array]) { $user = $user[0] }
-        Add-LogEntry -Categoria 'Info' -Mensaje 'Usuario creado.' -Detalle $upn
-        $manifiesto.Usuarios += $upn
-    }
-
-    $Escenario.Usuarios.Add([pscustomobject]@{
-        Id                = $user.Id
-        DisplayName       = $displayName
-        UserPrincipalName = $upn
-        PasswordGenerada  = $passwordGeneradaAuto
-    })
-
-    Write-LabOk "Usuario listo: $upn"
-    return $user
-}
-
-function New-GrupoInteractivo {
-    <#
-    .SYNOPSIS
-        Pide los datos de un grupo de seguridad y lo crea.
-    #>
-    param()
-
-    Show-LabBanner 'Nuevo grupo'
-
-    $displayName = Read-Host '  DisplayName'
-    if ([string]::IsNullOrWhiteSpace($displayName)) {
-        Write-LabWarn 'DisplayName vacio. Cancelando.'
-        return $null
-    }
-
-    $description = Read-Host '  Description (opcional)'
-    $mailNick = $displayName -replace '[^a-zA-Z0-9]', ''
-
-    $existing = Get-MgGroup -Filter "displayName eq '$displayName'" -ErrorAction SilentlyContinue
-    if ($existing) {
-        if ($existing -is [array]) { $existing = $existing[0] }
-        Write-LabWarn "El grupo $displayName ya existe. Se reutiliza."
-        $group = $existing
-        if ($manifiesto.Grupos -notcontains $displayName) { $manifiesto.Grupos += $displayName }
-    } else {
-        # NOTA: IsAssignableToRole omitido (requiere P1/P2)
-        $group = New-MgGroup -DisplayName $displayName -Description $description -MailNickname $mailNick -MailEnabled:$false -SecurityEnabled:$true -ErrorAction Stop
-        if ($null -eq $group) {
-            Write-LabError "New-MgGroup no devolvio objeto para $displayName."
-            return $null
-        }
-        if ($group -is [array]) { $group = $group[0] }
-        Add-LogEntry -Categoria 'Info' -Mensaje 'Grupo creado.' -Detalle $displayName
-        $manifiesto.Grupos += $displayName
-    }
-
-    $Escenario.Grupos.Add([pscustomobject]@{
-        Id          = $group.Id
-        DisplayName = $displayName
-    })
-
-    Write-LabOk "Grupo listo: $displayName"
-    return $group
-}
-
-function New-AppInteractiva {
-    <#
-    .SYNOPSIS
-        Pide los datos de una aplicación y crea también su service principal.
-    #>
-    param()
-
-    Show-LabBanner 'Nueva aplicacion'
-
-    $displayName = Read-Host '  DisplayName'
-    if ([string]::IsNullOrWhiteSpace($displayName)) {
-        Write-LabWarn 'DisplayName vacio. Cancelando.'
-        return $null
-    }
-
-    $description = Read-Host '  Description (opcional)'
-
-    $existing = Get-MgApplication -Filter "displayName eq '$displayName'" -ErrorAction SilentlyContinue
-    if ($existing) {
-        if ($existing -is [array]) { $existing = $existing[0] }
-        Write-LabWarn "La aplicacion $displayName ya existe. Se reutiliza."
-        $app = $existing
-        if ($manifiesto.Aplicaciones -notcontains $displayName) { $manifiesto.Aplicaciones += $displayName }
-    } else {
-        $app = New-MgApplication -DisplayName $displayName -Description $description -ErrorAction Stop
-        if ($null -eq $app) {
-            Write-LabError "New-MgApplication no devolvio objeto para $displayName."
-            return $null
-        }
-        if ($app -is [array]) { $app = $app[0] }
-        Add-LogEntry -Categoria 'Info' -Mensaje 'Aplicacion creada.' -Detalle $displayName
-        $manifiesto.Aplicaciones += $displayName
-    }
-
-    $appId = $app.AppId
-    if ($appId -is [array]) { $appId = $appId[0] }
-    $appId = $appId.ToString()
-
-    $existingSP = Get-MgServicePrincipal -Filter "appId eq '$appId'" -ErrorAction SilentlyContinue
-    if ($existingSP) {
-        if ($existingSP -is [array]) { $existingSP = $existingSP[0] }
-        $sp = $existingSP
-        if ($manifiesto.ServicePrincipals -notcontains $sp.Id) { $manifiesto.ServicePrincipals += $sp.Id }
-    } else {
-        $sp = New-MgServicePrincipal -AppId $appId -DisplayName $displayName -ErrorAction Stop
-        if ($null -eq $sp) {
-            Write-LabError "New-MgServicePrincipal no devolvio objeto para $displayName."
-            return $null
-        }
-        if ($sp -is [array]) { $sp = $sp[0] }
-        Add-LogEntry -Categoria 'Info' -Mensaje 'Service Principal creado.' -Detalle $sp.Id
-        $manifiesto.ServicePrincipals += $sp.Id
-    }
-
-    $Escenario.Aplicaciones.Add([pscustomobject]@{
-        Id               = $app.Id
-        AppId            = $appId
-        DisplayName      = $displayName
-        ServicePrincipal = $sp.Id
-    })
-
-    Write-LabOk "Aplicacion y SP listos: $displayName"
-    return $app
-}
-
-function Add-MiembroInteractivo {
-    <#
-    .SYNOPSIS
-        Añade uno de los usuarios del escenario a uno de los grupos del escenario.
-    #>
-    param()
-
-    if ($Escenario.Usuarios.Count -eq 0) {
-        Write-LabWarn 'No hay usuarios en el escenario. Crea alguno primero.'
-        return
-    }
-    if ($Escenario.Grupos.Count -eq 0) {
-        Write-LabWarn 'No hay grupos en el escenario. Crea alguno primero.'
-        return
-    }
-
-    Show-LabBanner 'Añadir miembro a grupo'
-
-    Write-Host '  Usuarios disponibles:' -ForegroundColor Cyan
-    for ($i = 0; $i -lt $Escenario.Usuarios.Count; $i++) {
-        $u = $Escenario.Usuarios[$i]
-        Write-Host ('    [{0}] {1} ({2})' -f $i, $u.DisplayName, $u.UserPrincipalName)
-    }
-    $selU = Read-Host '  Numero de usuario'
-    if (-not ($selU -match '^\d+$') -or [int]$selU -ge $Escenario.Usuarios.Count) {
-        Write-LabWarn 'Seleccion invalida.'
-        return
-    }
-    $user = $Escenario.Usuarios[[int]$selU]
-
-    Write-Host '  Grupos disponibles:' -ForegroundColor Cyan
-    for ($i = 0; $i -lt $Escenario.Grupos.Count; $i++) {
-        $g = $Escenario.Grupos[$i]
-        Write-Host ('    [{0}] {1}' -f $i, $g.DisplayName)
-    }
-    $selG = Read-Host '  Numero de grupo'
-    if (-not ($selG -match '^\d+$') -or [int]$selG -ge $Escenario.Grupos.Count) {
-        Write-LabWarn 'Seleccion invalida.'
-        return
-    }
-    $group = $Escenario.Grupos[[int]$selG]
-
-    $body = @{ '@odata.id' = "https://graph.microsoft.com/v1.0/directoryObjects/$($user.Id)" }
-    try {
-        New-MgGroupMemberByRef -GroupId $group.Id -BodyParameter $body -ErrorAction Stop
-        $Escenario.Relaciones.Add([pscustomobject]@{
-            Tipo        = 'MembresiaGrupo'
-            GrupoId     = $group.Id
-            GrupoNombre = $group.DisplayName
-            UsuarioId   = $user.Id
-            UsuarioUpn  = $user.UserPrincipalName
-        })
-        Write-LabOk "Añadido $($user.DisplayName) a $($group.DisplayName)"
-    } catch {
-        Write-LabError "No se pudo añadir el miembro: $($_.Exception.Message)"
-    }
-}
-
-function Add-OwnerSPInteractivo {
-    <#
-    .SYNOPSIS
-        Asigna un usuario del escenario como propietario de un SP del escenario.
-    #>
-    param()
-
-    if ($Escenario.Usuarios.Count -eq 0 -or $Escenario.Aplicaciones.Count -eq 0) {
-        Write-LabWarn 'Necesitas al menos un usuario y una aplicacion en el escenario.'
-        return
-    }
-
-    Show-LabBanner 'Asignar propietario a un Service Principal'
-
-    Write-Host '  Usuarios disponibles:' -ForegroundColor Cyan
-    for ($i = 0; $i -lt $Escenario.Usuarios.Count; $i++) {
-        $u = $Escenario.Usuarios[$i]
-        Write-Host ('    [{0}] {1} ({2})' -f $i, $u.DisplayName, $u.UserPrincipalName)
-    }
-    $selU = Read-Host '  Numero de usuario'
-    if (-not ($selU -match '^\d+$') -or [int]$selU -ge $Escenario.Usuarios.Count) {
-        Write-LabWarn 'Seleccion invalida.'
-        return
-    }
-    $user = $Escenario.Usuarios[[int]$selU]
-
-    Write-Host '  Aplicaciones disponibles:' -ForegroundColor Cyan
-    for ($i = 0; $i -lt $Escenario.Aplicaciones.Count; $i++) {
-        $a = $Escenario.Aplicaciones[$i]
-        Write-Host ('    [{0}] {1}' -f $i, $a.DisplayName)
-    }
-    $selA = Read-Host '  Numero de aplicacion'
-    if (-not ($selA -match '^\d+$') -or [int]$selA -ge $Escenario.Aplicaciones.Count) {
-        Write-LabWarn 'Seleccion invalida.'
-        return
-    }
-    $app = $Escenario.Aplicaciones[[int]$selA]
-
-    $body = @{ '@odata.id' = "https://graph.microsoft.com/v1.0/directoryObjects/$($user.Id)" }
-    try {
-        New-MgServicePrincipalOwnerByRef -ServicePrincipalId $app.ServicePrincipal -BodyParameter $body -ErrorAction Stop
-        $Escenario.Relaciones.Add([pscustomobject]@{
-            Tipo       = 'PropietarioSP'
-            SPId       = $app.ServicePrincipal
-            AppNombre  = $app.DisplayName
-            UsuarioId  = $user.Id
-            UsuarioUpn = $user.UserPrincipalName
-        })
-        Write-LabOk "Propietario asignado: $($user.DisplayName) -> $($app.DisplayName)"
-    } catch {
-        Write-LabError "No se pudo asignar propietario: $($_.Exception.Message)"
-    }
-}
-
-# ============================================================
-# MENÚ DE CONSTRUCCIÓN DEL ESCENARIO
-# ============================================================
-
-$salirConstruccion = $false
-while (-not $salirConstruccion) {
-    Show-LabHeader -Titulo 'CREACION PERSONALIZADA - CONSTRUCCION DEL ESCENARIO'
-
-    Write-Host '--- Estado actual del escenario ---' -ForegroundColor Yellow
-    Write-Host "  Usuarios     : $($Escenario.Usuarios.Count)"
-    Write-Host "  Grupos       : $($Escenario.Grupos.Count)"
-    Write-Host "  Aplicaciones : $($Escenario.Aplicaciones.Count)"
-    Write-Host "  Relaciones   : $($Escenario.Relaciones.Count)"
+    Write-Host '  --- Gestionar ---' -ForegroundColor Cyan
+    Write-Host '  [L] Listar detalle'
+    Write-Host '  [B] Borrar objeto local'
     Write-Host ''
-
-    Write-Host '--- Añadir elementos ---' -ForegroundColor Cyan
-    Write-Host '  [1] Nuevo usuario'
-    Write-Host '  [2] Nuevo grupo'
-    Write-Host '  [3] Nueva aplicacion (con SP)'
-    Write-Host ''
-    Write-Host '--- Añadir relaciones ---' -ForegroundColor Cyan
-    Write-Host '  [4] Añadir miembro a grupo'
-    Write-Host '  [5] Asignar propietario a un SP'
-    Write-Host ''
-    Write-Host '--- Listar ---' -ForegroundColor Cyan
-    Write-Host '  [L] Listar elementos del escenario'
-    Write-Host ''
-    Write-Host '  [S] Salir SIN guardar manifiesto'
+    Write-Host '  --- Finalizar ---' -ForegroundColor Cyan
     Write-Host '  [G] Guardar manifiesto y finalizar'
+    Write-Host '  [X] Exportar escenario como JSON'
+    Write-Host '  [S] Salir sin guardar'
     Write-Host ''
 
-    $op = Read-Host 'Selecciona una opcion'
+    $op = Read-Host 'Selecciona una opción'
 
     switch ($op.ToUpper()) {
-        '1' { $null = New-UsuarioInteractivo -TenantDomain $TenantDomain }
-        '2' { $null = New-GrupoInteractivo }
-        '3' { $null = New-AppInteractiva }
-        '4' { Add-MiembroInteractivo }
-        '5' { Add-OwnerSPInteractivo }
+        'A' {
+            $cap = Show-LabMenuCapacidades -Nivel $nivel -Contexto $ctx
+            if ($cap) {
+                try {
+                    $def = & $cap.PreguntarUI $ctx
+                    if ($null -ne $def) {
+                        if (-not $esc.Secciones.ContainsKey($cap.Nombre)) {
+                            $esc.Secciones[$cap.Nombre] = @()
+                        }
+                        $esc.Secciones[$cap.Nombre] += $def
+                        Write-LabOk "Objeto añadido a '$($cap.Nombre)'."
+                    }
+                } catch {
+                    Write-LabError "Error en PreguntarUI de '$($cap.Nombre)': $($_.Exception.Message)"
+                }
+            }
+            Wait-LabKey
+        }
         'L' {
-            Show-LabBanner 'Elementos del escenario'
-            Write-Host 'Usuarios:' -ForegroundColor Cyan
-            if ($Escenario.Usuarios.Count) {
-                $Escenario.Usuarios | ForEach-Object { Write-Host "  - $($_.DisplayName) <$($_.UserPrincipalName)>" }
-            } else {
-                Write-Host '  (ninguno)' -ForegroundColor DarkGray
+            Show-LabEstadoEscenario -Escenario $esc
+            foreach ($nombreCap in $esc.Secciones.Keys) {
+                $def = @($esc.Secciones[$nombreCap])
+                if ($def.Count -eq 0) { continue }
+                Write-Host "  $nombreCap:" -ForegroundColor Cyan
+                foreach ($d in $def) {
+                    Write-Host "    - $($d | ConvertTo-Json -Compress)" -ForegroundColor Gray
+                }
             }
-            Write-Host ''
-            Write-Host 'Grupos:' -ForegroundColor Cyan
-            if ($Escenario.Grupos.Count) {
-                $Escenario.Grupos | ForEach-Object { Write-Host "  - $($_.DisplayName)" }
-            } else {
-                Write-Host '  (ninguno)' -ForegroundColor DarkGray
+            Wait-LabKey
+        }
+        'B' {
+            Invoke-BorrarObjetoLocal -Escenario $esc
+            Wait-LabKey
+        }
+        'G' {
+            if (Read-LabConfirm '¿Guardar manifiesto y finalizar la creación manual?') {
+                $salir = $true
             }
-            Write-Host ''
-            Write-Host 'Aplicaciones:' -ForegroundColor Cyan
-            if ($Escenario.Aplicaciones.Count) {
-                $Escenario.Aplicaciones | ForEach-Object { Write-Host "  - $($_.DisplayName) (SP: $($_.ServicePrincipal))" }
-            } else {
-                Write-Host '  (ninguna)' -ForegroundColor DarkGray
-            }
-            Write-Host ''
-            Write-Host 'Relaciones:' -ForegroundColor Cyan
-            if ($Escenario.Relaciones.Count) {
-                $Escenario.Relaciones | ForEach-Object { Write-Host "  - $($_.Tipo): $($_.UsuarioUpn) -> $($_.GrupoNombre)$($_.AppNombre)" }
-            } else {
-                Write-Host '  (ninguna)' -ForegroundColor DarkGray
+        }
+        'X' {
+            $nombreExport = Read-Host 'Nombre del escenario a exportar (sin extensión)'
+            if (-not [string]::IsNullOrWhiteSpace($nombreExport)) {
+                $path = Join-Path (Get-LabEscenariosPath) "$nombreExport.json"
+                try {
+                    $obj = ConvertFrom-LabEscenarioNormalizado -EscenarioNormalizado $esc
+                    $obj | ConvertTo-Json -Depth 15 | Set-Content -Path $path -Encoding UTF8 -Force
+                    Write-LabOk "Escenario exportado: $path"
+                } catch {
+                    Write-LabError "No se pudo exportar: $($_.Exception.Message)"
+                }
             }
             Wait-LabKey
         }
         'S' {
-            if (Read-LabConfirm '¿Salir sin guardar el manifiesto? Los objetos creados quedaran sin registrar para cleanup.') {
-                $salirConstruccion = $true
-                Write-LabWarn 'Saliendo sin guardar manifiesto.'
-            }
-        }
-        'G' {
-            if ($Escenario.Usuarios.Count -eq 0 -and $Escenario.Grupos.Count -eq 0 -and $Escenario.Aplicaciones.Count -eq 0) {
-                Write-LabWarn 'No hay nada que guardar. Sal del menu con [S] si quieres salir.'
-            } else {
-                if (Read-LabConfirm '¿Guardar manifiesto y finalizar la creacion personalizada?') {
-                    $salirConstruccion = $true
-                }
+            if (Read-LabConfirm '¿Salir sin guardar el manifiesto? Los objetos creados quedarán sin registrar para cleanup.') {
+                $salir = $true
+                $esc = $null
             }
         }
         default {
-            Write-LabWarn 'Opcion no valida.'
+            Write-LabWarn 'Opción no válida.'
             Start-Sleep -Seconds 1
         }
     }
 }
 
-# ============================================================
-# GUARDADO DEL MANIFIESTO Y LOG
-# ============================================================
-Write-LabBanner 'Finalizando creacion personalizada'
+# 5. Si se guardó, crear y guardar manifiesto
+if ($null -ne $esc) {
+    $manifiesto = New-LabManifiestoVacio -Escenario $esc.Nombre -Nivel $nivel -Semilla $nombreSemilla
+    $manifiesto.TenantDomain = (Get-MgContext).TenantId
 
-$manifiestoPath = Get-LabManifiestoPath
+    $resultado = Invoke-LabCreacion -EscenarioNormalizado $esc -Manifiesto $manifiesto -Config $config
 
-if ($Escenario.Usuarios.Count -gt 0 -or $Escenario.Grupos.Count -gt 0 -or $Escenario.Aplicaciones.Count -gt 0) {
+    $manifiestoPath = Get-LabManifiestoPath
     if (Save-LabManifiesto -Manifiesto $manifiesto -Path $manifiestoPath) {
-        Add-LogEntry -Categoria 'Info' -Mensaje 'Manifiesto guardado correctamente.' -Detalle $manifiestoPath
         Write-LabOk "Manifiesto guardado: $manifiestoPath"
     } else {
-        Add-LogEntry -Categoria 'Error' -Mensaje 'No se pudo guardar el manifiesto.' -Detalle $manifiestoPath
+        Write-LabError 'No se pudo guardar el manifiesto.'
     }
 
-    # Resumen final SIN contraseñas
-    Write-Host ''
-    Write-Host '--- Resumen del escenario creado ---' -ForegroundColor Cyan
-    Write-Host "  Usuarios     : $($Escenario.Usuarios.Count)"
-    Write-Host "  Grupos       : $($Escenario.Grupos.Count)"
-    Write-Host "  Aplicaciones : $($Escenario.Aplicaciones.Count)"
-    Write-Host "  Relaciones   : $($Escenario.Relaciones.Count)"
-    Write-Host ''
-
-    if ($Escenario.Usuarios.Count -gt 0) {
-        Write-Host 'Usuarios creados (sin contrasenas):' -ForegroundColor Yellow
-        foreach ($u in $Escenario.Usuarios) {
-            $nota = if ($u.PasswordGenerada) { ' [contrasena derivada de semilla]' } else { '' }
-            Write-Host "  $($u.UserPrincipalName)$nota" -ForegroundColor Gray
+    if ($ctx.PasswordsPorUpn.Count -gt 0) {
+        Write-Host ''
+        Write-Host '=== CONTRASEÑAS DERIVADAS (MOSTRAR UNA SOLA VEZ) ===' -ForegroundColor Yellow
+        Write-Host 'Anota estas credenciales. No se guardan en el manifiesto ni en el JSON.' -ForegroundColor Yellow
+        Write-Host "Semilla de esta sesión: $nombreSemilla" -ForegroundColor Yellow
+        Write-Host ''
+        foreach ($upn in $ctx.PasswordsPorUpn.Keys) {
+            Write-Host ("  {0} / {1}" -f $upn, $ctx.PasswordsPorUpn[$upn]) -ForegroundColor Gray
         }
         Write-Host ''
-        Write-Host 'Recuerda: las contrasenas no se guardan en disco ni en el manifiesto.' -ForegroundColor Yellow
-        Write-Host "Semilla de esta sesion: $nombreSemillaManual" -ForegroundColor Yellow
-        Write-Host 'Conservala para reproducir las contrasenas generadas automaticamente.' -ForegroundColor Yellow
-        Write-Host ''
     }
-} else {
-    Write-LabWarn 'No se creo ningun objeto. No se guarda manifiesto.'
 }
 
-# Log
-$logPath = Join-Path $PSScriptRoot "log_personalizada_$(Get-Date -Format 'yyyyMMdd_HHmmss').csv"
-try {
-    $log | Export-Csv -Path $logPath -NoTypeInformation -Encoding UTF8
-    Write-Host "Log completo: $logPath" -ForegroundColor Gray
-} catch {
-    Write-LabError "No se pudo guardar el log en $logPath : $($_.Exception.Message)"
-}
-
-$errores = ($log | Where-Object Categoria -eq 'Error').Count
-$avisos  = ($log | Where-Object Categoria -eq 'Warning').Count
-$total   = $log.Count
-
 Write-Host ''
-Write-Host '--- Resumen de ejecucion ---' -ForegroundColor Cyan
-Write-Host "Eventos totales: $total"
-Write-Host "Avisos:          $avisos" -ForegroundColor Yellow
-Write-Host "Errores:         $errores" -ForegroundColor Red
-Write-Host ''
-Write-LabOk 'Creacion personalizada finalizada.'
+Write-LabOk 'Creación manual finalizada.'

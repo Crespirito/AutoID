@@ -4,18 +4,28 @@
 .DESCRIPTION
     Proporciona:
       - Ruta canónica de menu_config.json
-      - Valores por defecto
+      - Valores por defecto (Verbose, NivelLicencia, App-Only)
       - Carga con validación de tipos
       - Guardado
       - Reseteo
       - Actualización parcial de claves
-.NOTES
-    Depende de lib_ui.ps1 (funciones Write-Lab*).
-    Se carga por dot-sourcing.
+
+    Claves gestionadas:
+      Verbose               (bool)   - más detalle en la salida
+      NivelLicencia         (string) - Free | P1 | P2
+      ClientId              (string) - Application (client) ID de la App
+      TenantId              (string) - Directory (tenant) ID
+      CertificateThumbprint (string) - Thumbprint del certificado en Cert:\CurrentUser\My
 
     SEGURIDAD:
-    menu_config.json NO contiene credenciales. Solo opciones del menú
-    (por ejemplo, Verbose). No debe añadirse aquí ningún secreto.
+    menu_config.json contiene ClientId, TenantId y CertificateThumbprint.
+    NO contiene la clave privada del certificado (esa vive en
+    Cert:\CurrentUser\My). El Thumbprint identifica el certificado y debe
+    tratarse como dato sensible. El fichero está en .gitignore y no debe
+    subirse a Git.
+.NOTES
+    Depende de lib_ui.ps1 (Write-Lab*).
+    Se carga por dot-sourcing desde menu.ps1.
 #>
 
 # ============================================================
@@ -27,18 +37,21 @@ $script:LabConfigPath     = Join-Path $PSScriptRoot $script:LabConfigFileName
 # ============================================================
 # VALORES POR DEFECTO
 # ============================================================
-# Para añadir una nueva opción persistente:
-#   1. Añadir la clave aquí con su valor por defecto.
-#   2. Añadir su lectura/validación en Get-LabConfig.
-#   3. Añadir su escritura en Save-LabConfig (ya es genérica).
-#   4. Añadir la acción correspondiente en menu.ps1.
 function Get-LabConfigDefaults {
     <#
     .SYNOPSIS
         Devuelve una copia nueva de los valores por defecto.
+    .DESCRIPTION
+        Incluye las claves de UI (Verbose), el nivel de licencia y los
+        datos App-Only. Las claves App-Only se rellenan desde menu.ps1
+        ([C] Gestionar sesión de Graph).
     #>
     return @{
-        Verbose = $false
+        Verbose               = $false
+        NivelLicencia         = 'Free'
+        ClientId              = ''
+        TenantId              = ''
+        CertificateThumbprint = ''
     }
 }
 
@@ -69,7 +82,8 @@ function Get-LabConfig {
         devuelve los valores por defecto.
     .DESCRIPTION
         Valida tipos para evitar que un JSON editado a mano con strings
-        ("true"/"false") rompa la lógica booleana del menú.
+        ("true"/"false") rompa la lógica booleana del menú. Las claves
+        App-Only se normalizan a string (vacío si no están).
     .OUTPUTS
         Hashtable con las claves de configuración.
     #>
@@ -98,6 +112,35 @@ function Get-LabConfig {
         } elseif ($raw -is [int]) {
             $config.Verbose = ($raw -ne 0)
         }
+    }
+
+    # --- NivelLicencia ---
+    if ($null -ne $loaded.PSObject.Properties['NivelLicencia']) {
+        $raw = $loaded.NivelLicencia
+        if ($null -ne $raw) {
+            $valor = ([string]$raw).Trim()
+            if ($valor -in @('Free','P1','P2')) {
+                $config.NivelLicencia = $valor
+            }
+        }
+    }
+
+    # --- ClientId ---
+    if ($null -ne $loaded.PSObject.Properties['ClientId']) {
+        $raw = $loaded.ClientId
+        if ($null -ne $raw) { $config.ClientId = ([string]$raw).Trim() }
+    }
+
+    # --- TenantId ---
+    if ($null -ne $loaded.PSObject.Properties['TenantId']) {
+        $raw = $loaded.TenantId
+        if ($null -ne $raw) { $config.TenantId = ([string]$raw).Trim() }
+    }
+
+    # --- CertificateThumbprint ---
+    if ($null -ne $loaded.PSObject.Properties['CertificateThumbprint']) {
+        $raw = $loaded.CertificateThumbprint
+        if ($null -ne $raw) { $config.CertificateThumbprint = ([string]$raw).Trim() }
     }
 
     return $config
@@ -142,9 +185,6 @@ function Update-LabConfig {
     <#
     .SYNOPSIS
         Aplica cambios parciales a la configuración y la guarda.
-    .DESCRIPTION
-        Útil para que el menú modifique una clave sin tener que leer,
-        modificar y guardar manualmente.
     .PARAMETER Cambios
         Hashtable con las claves a modificar.
     .OUTPUTS
@@ -161,4 +201,26 @@ function Update-LabConfig {
     }
     $null = Save-LabConfig -Config $config
     return $config
+}
+
+# ============================================================
+# HELPERS APP-ONLY
+# ============================================================
+
+function Test-LabAppOnlyConfigComplete {
+    <#
+    .SYNOPSIS
+        Devuelve $true si la configuración App-Only tiene los tres datos.
+    .PARAMETER Config
+        Hashtable de configuración.
+    #>
+    param(
+        [Parameter(Mandatory = $true)]
+        [hashtable]$Config
+    )
+    return (
+        -not [string]::IsNullOrWhiteSpace($Config.ClientId) -and
+        -not [string]::IsNullOrWhiteSpace($Config.TenantId) -and
+        -not [string]::IsNullOrWhiteSpace($Config.CertificateThumbprint)
+    )
 }

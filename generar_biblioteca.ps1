@@ -1,130 +1,128 @@
 <#
 .SYNOPSIS
-    Generador de biblioteca de datos para escenarios de laboratorio en Entra ID.
+    Generador de biblioteca de datos y escenarios de ejemplo para Entra ID.
 .DESCRIPTION
-    Genera en escenarios/:
-      - escenario/escenarioej1.json, escenarioej2.json, escenarioej3.json
-      - vulnerab/escenarioej1_sp_owner.json, escenarioej2_sp_owner.json, escenarioej3_sp_owner.json
-      - biblioteca.json en la raíz de OutDir
-      - .secrets/<escenario>.seed (semilla local por escenario, fuera de Git)
+    Genera directamente en las rutas que el programa lee:
+      - escenarios/escenario/*.json    -> escenarios de ejemplo
+      - escenarios/vulnerab/*.json     -> vulnerabilidades de ejemplo
+      - escenarios/plantillas/*.json   -> plantillas para el flujo nivel -> tipo
+      - escenarios/.secrets/*.seed     -> semillas locales (no sobrescribe)
+      - biblioteca.json                -> biblioteca de datos para inspeccion
 
-    Los JSON generados NO contienen contraseñas. Las contraseñas de los
-    usuarios se derivan en tiempo de creación (creauto.ps1 / creamanual.ps1)
-    a partir de la semilla local de cada escenario, con
-    HMAC-SHA256(semilla, UPN).
+    FILTRADO POR NIVEL:
+    El parametro -Nivel controla que secciones se generan:
+      - Free: usuarios, grupos, aplicaciones, appRoles, credencialesApp,
+              permisosApi, invitados, relaciones, vulnerabilidades.
+      - P1:   anade administrativeUnits, gruposDinamicos,
+              gruposRoleAssignable, licencias, accesoCondicional, metodosAuth.
+      - P2:   anade pim.
+      - Auto: detecta el nivel consultando Get-MgSubscribedSku si hay sesion.
+              Si no hay sesion, cae a 'Free' con aviso.
 
-    La semilla se genera aquí (una por escenario) si no existe. Si ya existe,
-    NO se sobrescribe, para no invalidar contraseñas ya mostradas al operador.
-
-    Los datos base (nombres, apellidos) se generan a partir de listas embebidas
-    para que el script sea autónomo. Si quieres más variedad, sustituye las
-    listas por las de https://github.com/jvalhondo/spanish-names-surnames
+    SEGURIDAD:
+    - Los JSON NO contienen contrasenas ni secretos. Las contrasenas se
+      derivan de la semilla en creauto.ps1 / creamanual.ps1. Los secretos
+      de app se generan en la creacion y se muestran una sola vez.
+    - Las politicas de Acceso Condicional se generan en estado 'disabled'.
+    - Las semillas existentes NO se sobrescriben.
 .PARAMETER Seed
-    Semilla para el generador aleatorio de datos (nombres, apellidos, etc.).
-    Útil para reproducibilidad de los JSON. NO es la semilla de contraseñas.
+    Semilla para el generador aleatorio de datos (nombres, apellidos).
+    NO es la semilla de contrasenas.
+.PARAMETER Nivel
+    Nivel de licencia: 'Auto', 'Free', 'P1' o 'P2'. Por defecto 'Auto'.
 .PARAMETER OutDir
-    Carpeta de salida. Por defecto, escenarios/ en la carpeta del script.
+    Carpeta raiz de salida. Por defecto, escenarios/ junto al script.
 .NOTES
     Autocontenido. No depende de lib_*.ps1.
-    Las contraseñas NO se generan aquí; solo las semillas locales.
 #>
 [CmdletBinding()]
 param(
     [int]$Seed = 42,
+    [ValidateSet('Auto','Free','P1','P2')]
+    [string]$Nivel = 'Auto',
     [string]$OutDir = (Join-Path $PSScriptRoot 'escenarios')
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
-Write-Host ''
-Write-LabInfoSafe 'Este generador NO crea contrasenas. Solo genera datos y semillas locales.'
-Write-LabInfoSafe 'Las contrasenas se derivan en creauto.ps1 / creamanual.ps1 desde la semilla del escenario.'
-Write-Host ''
-
-# Helper local para no depender de lib_ui.ps1
-function Write-LabInfoSafe {
-    param([string]$Msg)
-    Write-Host "[INFO]  $Msg" -ForegroundColor Gray
-}
-
-function Write-LabWarnSafe {
-    param([string]$Msg)
-    Write-Host "[WARN]  $Msg" -ForegroundColor Yellow
-}
+# ============================================================
+# HELPERS LOCALES (no dependen de lib_ui.ps1)
+# ============================================================
+function Write-InfoLocal { param([string]$Msg) Write-Host "[INFO]  $Msg" -ForegroundColor Gray }
+function Write-OkLocal   { param([string]$Msg) Write-Host "[OK]    $Msg" -ForegroundColor Green }
+function Write-WarnLocal { param([string]$Msg) Write-Host "[WARN]  $Msg" -ForegroundColor Yellow }
 
 # ============================================================
-# GESTIÓN DE SEMILLAS LOCALES
+# DETECCIÓN DE NIVEL
 # ============================================================
-# La semilla vive en escenarios/.secrets/<escenario>.seed, fuera de Git.
-# Se reutiliza la misma derivación que en creauto.ps1 / creamanual.ps1.
+function Get-LabNivelDetectado {
+    <#
+    .SYNOPSIS
+        Detecta el nivel del tenant consultando los SKUs suscritos.
+        Si no hay sesion o falla, devuelve 'Free'.
+    #>
+    try {
+        if (-not (Get-MgContext -ErrorAction SilentlyContinue)) {
+            Write-WarnLocal 'Sin sesion de Graph. No se puede detectar el nivel; se usa Free.'
+            return 'Free'
+        }
+        $skus = Get-MgSubscribedSku -ErrorAction Stop
+        $tieneP1 = $false
+        $tieneP2 = $false
+        foreach ($sku in @($skus)) {
+            foreach ($plan in @($sku.ServicePlans)) {
+                if ($plan.ProvisioningStatus -ne 'Success') { continue }
+                if ($plan.ServicePlanName -eq 'AAD_PREMIUM')    { $tieneP1 = $true }
+                if ($plan.ServicePlanName -eq 'AAD_PREMIUM_P2') { $tieneP2 = $true }
+            }
+        }
+        if ($tieneP2) { return 'P2' }
+        if ($tieneP1) { return 'P1' }
+        return 'Free'
+    } catch {
+        Write-WarnLocal "No se pudo detectar el nivel: $($_.Exception.Message). Se usa Free."
+        return 'Free'
+    }
+}
 
+if ($Nivel -eq 'Auto') {
+    $Nivel = Get-LabNivelDetectado
+}
+Write-InfoLocal "Nivel de generacion: $Nivel"
+
+# ============================================================
+# SEMILLAS LOCALES
+# ============================================================
 function Get-LabSecretsDir {
-    <#
-    .SYNOPSIS
-        Devuelve la ruta de la carpeta de secretos locales (fuera de Git).
-    #>
-    param(
-        [Parameter(Mandatory = $true)]
-        [string]$RootDir
-    )
-    return (Join-Path $RootDir '.secrets')
-}
-
-function Get-LabSeedPath {
-    <#
-    .SYNOPSIS
-        Devuelve la ruta del fichero de semilla para un escenario concreto.
-    #>
-    param(
-        [Parameter(Mandatory = $true)]
-        [string]$RootDir,
-
-        [Parameter(Mandatory = $true)]
-        [string]$NombreEscenario
-    )
-    return (Join-Path (Get-LabSecretsDir -RootDir $RootDir) "$NombreEscenario.seed")
+    param([string]$Root)
+    return (Join-Path $Root '.secrets')
 }
 
 function New-LabSeedIfMissing {
     <#
     .SYNOPSIS
         Crea la semilla local de un escenario si no existe. No sobrescribe.
-    .DESCRIPTION
-        La semilla es un array de 32 bytes aleatorios criptográficamente
-        seguros, almacenado en Base64. Se intentan restringir permisos ACL
-        en Windows.
-    .OUTPUTS
-        Ruta del fichero de semilla (existente o recién creado).
     #>
     param(
-        [Parameter(Mandatory = $true)]
-        [string]$RootDir,
-
-        [Parameter(Mandatory = $true)]
-        [string]$NombreEscenario
+        [Parameter(Mandatory = $true)] [string]$Root,
+        [Parameter(Mandatory = $true)] [string]$NombreEscenario
     )
 
-    $seedPath = Get-LabSeedPath -RootDir $RootDir -NombreEscenario $NombreEscenario
-    $seedDir  = Split-Path -Path $seedPath -Parent
-
+    $seedDir = Get-LabSecretsDir -Root $Root
     if (-not (Test-Path -Path $seedDir)) {
         $null = New-Item -ItemType Directory -Path $seedDir -Force
     }
+    $seedPath = Join-Path $seedDir "$NombreEscenario.seed"
 
     if (Test-Path -Path $seedPath) {
-        Write-LabInfoSafe "Semilla existente para '$NombreEscenario'; no se sobrescribe."
+        Write-InfoLocal "Semilla existente para '$NombreEscenario'; no se sobrescribe."
         return $seedPath
     }
 
     $bytes = New-Object byte[] 32
     $rng = [System.Security.Cryptography.RandomNumberGenerator]::Create()
-    try {
-        $rng.GetBytes($bytes)
-    } finally {
-        $rng.Dispose()
-    }
-
+    try { $rng.GetBytes($bytes) } finally { $rng.Dispose() }
     $b64 = [Convert]::ToBase64String($bytes)
     Set-Content -Path $seedPath -Value $b64 -Encoding UTF8 -Force
 
@@ -141,15 +139,15 @@ function New-LabSeedIfMissing {
             Set-Acl -Path $seedPath -AclObject $acl
         }
     } catch {
-        Write-LabWarnSafe "No se pudieron restringir los permisos de $seedPath : $($_.Exception.Message)"
+        Write-WarnLocal "No se pudieron restringir los permisos de $seedPath : $($_.Exception.Message)"
     }
 
-    Write-LabInfoSafe "Semilla generada para '$NombreEscenario' en $seedPath"
+    Write-InfoLocal "Semilla generada para '$NombreEscenario'."
     return $seedPath
 }
 
 # ============================================================
-# DATOS BASE (listas embebidas)
+# DATOS BASE
 # ============================================================
 $Nombres = @(
     'Lucia','Javier','Maria','Carlos','Elena','Pablo','Sara','Alberto','Carmen','David',
@@ -178,25 +176,12 @@ $RolesAzure = @(
     'Monitoring Contributor','Network Contributor'
 )
 
-# Inicializar generador aleatorio con semilla para reproducibilidad
 $rng = [System.Random]::new($Seed)
-
-function Get-RandomItem {
-    <#
-    .SYNOPSIS
-        Devuelve un elemento aleatorio de una lista usando el RNG con semilla.
-    #>
-    param(
-        [Parameter(Mandatory = $true)]
-        [array]$Lista
-    )
-    return $Lista[$rng.Next(0, $Lista.Count)]
-}
+function Get-RandomItem { param([array]$Lista) return $Lista[$rng.Next(0, $Lista.Count)] }
 
 # ============================================================
-# GENERACIÓN DE USUARIOS
+# GENERACIÓN DE USUARIOS (sin contrasenas)
 # ============================================================
-# Sin contraseña: el campo 'password' ya no se incluye en el JSON.
 $usuarios = @()
 $usados = [System.Collections.Generic.HashSet[string]]::new()
 $i = 0
@@ -217,7 +202,7 @@ while ($usuarios.Count -lt 10) {
 }
 
 # ============================================================
-# GENERACIÓN DE GRUPOS (uno por departamento)
+# GENERACIÓN DE GRUPOS
 # ============================================================
 $grupos = @()
 foreach ($d in $Departamentos) {
@@ -254,11 +239,12 @@ foreach ($r in $RolesEntra) { $roles += [ordered]@{ tipo = 'EntraRole'; nombre =
 foreach ($r in $RolesAzure) { $roles += [ordered]@{ tipo = 'AzureRBAC'; nombre = $r } }
 
 # ============================================================
-# CONSTRUCCIÓN DE LA BIBLIOTECA
+# BIBLIOTECA (inspeccion)
 # ============================================================
 $biblioteca = [ordered]@{
     generado      = (Get-Date).ToString('yyyy-MM-ddTHH:mm:ss')
     seed          = $Seed
+    nivel         = $Nivel
     usuarios      = $usuarios
     grupos        = $grupos
     aplicaciones  = $aplicaciones
@@ -268,12 +254,13 @@ $biblioteca = [ordered]@{
 }
 
 # ============================================================
-# CONSTRUCCIÓN DE ESCENARIOS DE EJEMPLO
+# CONSTRUCCIÓN DE ESCENARIOS
 # ============================================================
-function New-EscenarioEjemplo {
+function New-EscenarioBase {
     <#
     .SYNOPSIS
-        Construye un escenario de ejemplo a partir de la biblioteca.
+        Construye un escenario de ejemplo con secciones Free y, si el
+        nivel lo permite, secciones P1 y P2.
     #>
     param(
         [Parameter(Mandatory = $true)] [string]$Nombre,
@@ -283,7 +270,8 @@ function New-EscenarioEjemplo {
         [Parameter(Mandatory = $true)] [int]$NumApps,
         [Parameter(Mandatory = $true)] [int]$OffsetUsuarios,
         [Parameter(Mandatory = $true)] [int]$OffsetGrupos,
-        [Parameter(Mandatory = $true)] [int]$OffsetApps
+        [Parameter(Mandatory = $true)] [int]$OffsetApps,
+        [Parameter(Mandatory = $true)] [string]$NivelActual
     )
 
     $us = @()
@@ -304,7 +292,7 @@ function New-EscenarioEjemplo {
         }
     }
 
-    return [ordered]@{
+    $esc = [ordered]@{
         nombre         = $Nombre
         descripcion    = $Descripcion
         usuarios       = $us
@@ -313,25 +301,139 @@ function New-EscenarioEjemplo {
         relaciones     = $rels
         vulnerabilidad = "$($Nombre)_sp_owner"
     }
+
+    if ($ap.Count -gt 0 -and $us.Count -gt 0) {
+        $esc['appRoles'] = @(
+            [ordered]@{
+                aplicacion         = $ap[0].displayName
+                displayName        = 'Administrador'
+                value              = 'Admin'
+                allowedMemberTypes = @('User')
+            },
+            [ordered]@{
+                aplicacion = $ap[0].displayName
+                value      = 'Admin'
+                principal  = $us[0].upn
+            }
+        )
+    }
+
+    if ($ap.Count -gt 0) {
+        $esc['credencialesApp'] = @(
+            [ordered]@{
+                aplicacion  = $ap[0].displayName
+                displayName = 'Lab secret'
+                endDateTime = (Get-Date).AddYears(1).ToString('o')
+            }
+        )
+    }
+
+    if ($ap.Count -gt 0) {
+        $esc['permisosApi'] = @(
+            [ordered]@{
+                aplicacion = $ap[0].displayName
+                recurso    = 'Microsoft Graph'
+                permiso    = 'User.Read.All'
+                tipo       = 'application'
+            },
+            [ordered]@{
+                aplicacion = $ap[0].displayName
+                recurso    = 'Microsoft Graph'
+                permiso    = 'Group.Read.All'
+                tipo       = 'delegated'
+            }
+        )
+    }
+
+    $esc['invitados'] = @(
+        [ordered]@{
+            email       = "invitado.$($Nombre)@contoso.com"
+            displayName = "Invitado $($Nombre)"
+        }
+    )
+
+    if ($NivelActual -in @('P1','P2')) {
+        if ($us.Count -gt 0 -and $gr.Count -gt 0) {
+            $esc['administrativeUnits'] = @(
+                [ordered]@{
+                    displayName = "AU $($Nombre)"
+                    description = "Unidad administrativa de $($Nombre)"
+                    members     = @($us[0].upn, $gr[0].displayName)
+                    roles       = @()
+                }
+            )
+        }
+
+        $esc['gruposDinamicos'] = @(
+            [ordered]@{
+                displayName     = "Dinamico $($Nombre) - Guests"
+                description     = 'Grupo dinamico de invitados'
+                membershipRule  = '(user.userType -eq "Guest")'
+                processingState = 'On'
+            }
+        )
+
+        $esc['gruposRoleAssignable'] = @(
+            [ordered]@{
+                displayName = "RoleAssignable $($Nombre)"
+                description = 'Grupo con asignacion de roles'
+            }
+        )
+
+        if ($us.Count -gt 0) {
+            $esc['licencias'] = @(
+                [ordered]@{
+                    usuario       = $us[0].upn
+                    skuPartNumber = 'ENTERPRISEPACK'
+                }
+            )
+        }
+
+        $esc['accesoCondicional'] = @(
+            [ordered]@{
+                displayName = "CA $($Nombre) - MFA para admins"
+                state       = 'disabled'
+                conditions  = [ordered]@{
+                    users        = @{ includeRoles = @('62e90394-69f5-4237-9190-012177145e10') }
+                    applications = @{ includeApplications = @('All') }
+                }
+                grantControls = [ordered]@{
+                    operator        = 'OR'
+                    builtInControls = @('mfa')
+                }
+            }
+        )
+
+        if ($us.Count -gt 0) {
+            $esc['metodosAuth'] = @(
+                [ordered]@{
+                    usuario           = $us[0].upn
+                    lifetimeInMinutes = 60
+                    isUsableOnce      = $true
+                }
+            )
+        }
+    }
+
+    if ($NivelActual -eq 'P2') {
+        if ($us.Count -gt 0) {
+            $esc['pim'] = @(
+                [ordered]@{
+                    usuario  = $us[0].upn
+                    rol      = 'User Administrator'
+                    duracion = 'PT8H'
+                }
+            )
+        }
+    }
+
+    return $esc
 }
 
-$esc1 = New-EscenarioEjemplo -Nombre 'escenarioej1' -Descripcion 'Escenario de ejemplo 1: 3 usuarios, 2 grupos, 1 aplicacion.' `
-    -NumUsuarios 3 -NumGrupos 2 -NumApps 1 -OffsetUsuarios 0 -OffsetGrupos 0 -OffsetApps 0
-
-$esc2 = New-EscenarioEjemplo -Nombre 'escenarioej2' -Descripcion 'Escenario de ejemplo 2: 5 usuarios, 3 grupos, 2 aplicaciones.' `
-    -NumUsuarios 5 -NumGrupos 3 -NumApps 2 -OffsetUsuarios 3 -OffsetGrupos 2 -OffsetApps 1
-
-$esc3 = New-EscenarioEjemplo -Nombre 'escenarioej3' -Descripcion 'Escenario de ejemplo 3: 10 usuarios, 10 grupos, 10 aplicaciones (biblioteca completa).' `
-    -NumUsuarios 10 -NumGrupos 10 -NumApps 10 -OffsetUsuarios 0 -OffsetGrupos 0 -OffsetApps 0
-
 # ============================================================
-# CONSTRUCCIÓN DE VULNERABILIDADES DE EJEMPLO
+# CONSTRUCCIÓN DE VULNERABILIDADES
 # ============================================================
 function New-VulnerabilidadSpOwner {
-    <#
-    .SYNOPSIS
-        Construye una vulnerabilidad de tipo ServicePrincipalOwner.
-    #>
     param(
         [Parameter(Mandatory = $true)] [string]$Nombre,
         [Parameter(Mandatory = $true)] [string]$Usuario,
@@ -350,55 +452,114 @@ function New-VulnerabilidadSpOwner {
     }
 }
 
-$vuln1 = New-VulnerabilidadSpOwner -Nombre 'escenarioej1_sp_owner' `
-    -Usuario $esc1.usuarios[0].upn -Aplicacion $esc1.aplicaciones[0].displayName `
-    -Descripcion 'Owner de SP para el escenario 1.'
+# ============================================================
+# CONSTRUCCIÓN DE PLANTILLAS
+# ============================================================
+function New-Plantilla {
+    param(
+        [Parameter(Mandatory = $true)] [string]$Nombre,
+        [Parameter(Mandatory = $true)] [string]$Descripcion,
+        [Parameter(Mandatory = $true)] [string[]]$Secciones
+    )
 
-$vuln2 = New-VulnerabilidadSpOwner -Nombre 'escenarioej2_sp_owner' `
-    -Usuario $esc2.usuarios[0].upn -Aplicacion $esc2.aplicaciones[0].displayName `
-    -Descripcion 'Owner de SP para el escenario 2.'
-
-$vuln3 = New-VulnerabilidadSpOwner -Nombre 'escenarioej3_sp_owner' `
-    -Usuario $esc3.usuarios[0].upn -Aplicacion $esc3.aplicaciones[0].displayName `
-    -Descripcion 'Owner de SP para el escenario 3.'
+    $obj = [ordered]@{
+        nombre      = $Nombre
+        descripcion = $Descripcion
+    }
+    foreach ($s in $Secciones) {
+        $obj[$s] = @()
+    }
+    return $obj
+}
 
 # ============================================================
 # ESCRITURA DE FICHEROS
 # ============================================================
-$escenarioDir = Join-Path $OutDir 'escenario'
-$vulnerabDir  = Join-Path $OutDir 'vulnerab'
+$escenarioDir  = Join-Path $OutDir 'escenario'
+$vulnerabDir   = Join-Path $OutDir 'vulnerab'
+$plantillasDir = Join-Path $OutDir 'plantillas'
 $null = New-Item -ItemType Directory -Path $escenarioDir -Force
-$null = New-Item -ItemType Directory -Path $vulnerabDir  -Force
+$null = New-Item -ItemType Directory -Path $vulnerabDir -Force
+$null = New-Item -ItemType Directory -Path $plantillasDir -Force
 
-$libPath  = Join-Path $OutDir 'biblioteca.json'
+$esc1 = New-EscenarioBase -Nombre 'escenarioej1' -Descripcion 'Escenario de ejemplo 1: 3 usuarios, 2 grupos, 1 aplicacion.' `
+    -NumUsuarios 3 -NumGrupos 2 -NumApps 1 -OffsetUsuarios 0 -OffsetGrupos 0 -OffsetApps 0 -NivelActual $Nivel
+
+$esc2 = New-EscenarioBase -Nombre 'escenarioej2' -Descripcion 'Escenario de ejemplo 2: 5 usuarios, 3 grupos, 2 aplicaciones.' `
+    -NumUsuarios 5 -NumGrupos 3 -NumApps 2 -OffsetUsuarios 3 -OffsetGrupos 2 -OffsetApps 1 -NivelActual $Nivel
+
+$esc3 = New-EscenarioBase -Nombre 'escenarioej3' -Descripcion 'Escenario de ejemplo 3: 10 usuarios, 10 grupos, 10 aplicaciones.' `
+    -NumUsuarios 10 -NumGrupos 10 -NumApps 10 -OffsetUsuarios 0 -OffsetGrupos 0 -OffsetApps 0 -NivelActual $Nivel
+
+$vuln1 = New-VulnerabilidadSpOwner -Nombre 'escenarioej1_sp_owner' `
+    -Usuario $esc1.usuarios[0].upn -Aplicacion $esc1.aplicaciones[0].displayName `
+    -Descripcion 'Owner de SP para el escenario 1.'
+$vuln2 = New-VulnerabilidadSpOwner -Nombre 'escenarioej2_sp_owner' `
+    -Usuario $esc2.usuarios[0].upn -Aplicacion $esc2.aplicaciones[0].displayName `
+    -Descripcion 'Owner de SP para el escenario 2.'
+$vuln3 = New-VulnerabilidadSpOwner -Nombre 'escenarioej3_sp_owner' `
+    -Usuario $esc3.usuarios[0].upn -Aplicacion $esc3.aplicaciones[0].displayName `
+    -Descripcion 'Owner de SP para el escenario 3.'
+
+$plantillaBasico = New-Plantilla -Nombre 'basico' -Descripcion 'Usuarios, grupos, aplicaciones y relaciones.' `
+    -Secciones @('usuarios','grupos','aplicaciones','relaciones')
+$plantillaApps = New-Plantilla -Nombre 'aplicaciones' -Descripcion 'Aplicaciones, appRoles, credenciales y permisos de API.' `
+    -Secciones @('usuarios','aplicaciones','appRoles','credencialesApp','permisosApi')
+$plantillaInvitados = New-Plantilla -Nombre 'invitados' -Descripcion 'Usuarios invitados (B2B).' `
+    -Secciones @('invitados')
+$plantillaMixto = New-Plantilla -Nombre 'mixto' -Descripcion 'Todas las secciones disponibles para el nivel actual.' `
+    -Secciones @('usuarios','grupos','aplicaciones','relaciones','appRoles','credencialesApp','permisosApi','invitados','vulnerabilidades')
+
+$plantillas = [ordered]@{
+    'basico'       = $plantillaBasico
+    'aplicaciones' = $plantillaApps
+    'invitados'    = $plantillaInvitados
+    'mixto'        = $plantillaMixto
+}
+
+if ($Nivel -in @('P1','P2')) {
+    $plantillas['administracion'] = New-Plantilla -Nombre 'administracion' -Descripcion 'Administrative Units, grupos dinamicos y role-assignable.' `
+        -Secciones @('usuarios','grupos','administrativeUnits','gruposDinamicos','gruposRoleAssignable')
+    $plantillas['acceso'] = New-Plantilla -Nombre 'acceso' -Descripcion 'Acceso Condicional y metodos de autenticacion.' `
+        -Secciones @('accesoCondicional','metodosAuth')
+}
+
+if ($Nivel -eq 'P2') {
+    $plantillas['pim'] = New-Plantilla -Nombre 'pim' -Descripcion 'Roles elegibles PIM.' `
+        -Secciones @('usuarios','pim')
+}
+
 $esc1Path = Join-Path $escenarioDir 'escenarioej1.json'
 $esc2Path = Join-Path $escenarioDir 'escenarioej2.json'
 $esc3Path = Join-Path $escenarioDir 'escenarioej3.json'
-$vul1Path = Join-Path $vulnerabDir  'escenarioej1_sp_owner.json'
-$vul2Path = Join-Path $vulnerabDir  'escenarioej2_sp_owner.json'
-$vul3Path = Join-Path $vulnerabDir  'escenarioej3_sp_owner.json'
+$esc1 | ConvertTo-Json -Depth 15 | Set-Content -Path $esc1Path -Encoding UTF8
+$esc2 | ConvertTo-Json -Depth 15 | Set-Content -Path $esc2Path -Encoding UTF8
+$esc3 | ConvertTo-Json -Depth 15 | Set-Content -Path $esc3Path -Encoding UTF8
 
-$biblioteca | ConvertTo-Json -Depth 6 | Set-Content -Path $libPath  -Encoding UTF8
-$esc1       | ConvertTo-Json -Depth 6 | Set-Content -Path $esc1Path -Encoding UTF8
-$esc2       | ConvertTo-Json -Depth 6 | Set-Content -Path $esc2Path -Encoding UTF8
-$esc3       | ConvertTo-Json -Depth 6 | Set-Content -Path $esc3Path -Encoding UTF8
-$vuln1      | ConvertTo-Json -Depth 6 | Set-Content -Path $vul1Path -Encoding UTF8
-$vuln2      | ConvertTo-Json -Depth 6 | Set-Content -Path $vul2Path -Encoding UTF8
-$vuln3      | ConvertTo-Json -Depth 6 | Set-Content -Path $vul3Path -Encoding UTF8
+$vul1Path = Join-Path $vulnerabDir 'escenarioej1_sp_owner.json'
+$vul2Path = Join-Path $vulnerabDir 'escenarioej2_sp_owner.json'
+$vul3Path = Join-Path $vulnerabDir 'escenarioej3_sp_owner.json'
+$vuln1 | ConvertTo-Json -Depth 15 | Set-Content -Path $vul1Path -Encoding UTF8
+$vuln2 | ConvertTo-Json -Depth 15 | Set-Content -Path $vul2Path -Encoding UTF8
+$vuln3 | ConvertTo-Json -Depth 15 | Set-Content -Path $vul3Path -Encoding UTF8
 
-# ============================================================
-# GENERACIÓN DE SEMILLAS LOCALES POR ESCENARIO
-# ============================================================
-# Se crean (si no existen) las semillas de los escenarios generados.
-# NO se sobrescriben: si ya existían, se conservan las contraseñas
-# derivadas previamente mostradas al operador.
-$seed1 = New-LabSeedIfMissing -RootDir $OutDir -NombreEscenario 'escenarioej1'
-$seed2 = New-LabSeedIfMissing -RootDir $OutDir -NombreEscenario 'escenarioej2'
-$seed3 = New-LabSeedIfMissing -RootDir $OutDir -NombreEscenario 'escenarioej3'
+foreach ($nombrePlantilla in $plantillas.Keys) {
+    $path = Join-Path $plantillasDir "$nombrePlantilla.json"
+    $plantillas[$nombrePlantilla] | ConvertTo-Json -Depth 15 | Set-Content -Path $path -Encoding UTF8
+}
+
+$libPath = Join-Path $OutDir 'biblioteca.json'
+$biblioteca | ConvertTo-Json -Depth 15 | Set-Content -Path $libPath -Encoding UTF8
+
+$seed1 = New-LabSeedIfMissing -Root $OutDir -NombreEscenario 'escenarioej1'
+$seed2 = New-LabSeedIfMissing -Root $OutDir -NombreEscenario 'escenarioej2'
+$seed3 = New-LabSeedIfMissing -Root $OutDir -NombreEscenario 'escenarioej3'
 
 # ============================================================
 # RESUMEN
 # ============================================================
+Write-Host ''
+Write-OkLocal "Nivel de generacion: $Nivel"
 Write-Host ''
 Write-Host "[OK] Biblioteca   : $libPath"
 Write-Host "[OK] Escenario 1  : $esc1Path"
@@ -412,7 +573,9 @@ Write-Host "[OK] Semilla 1    : $seed1"
 Write-Host "[OK] Semilla 2    : $seed2"
 Write-Host "[OK] Semilla 3    : $seed3"
 Write-Host ''
+Write-Host "[OK] Plantillas   : $($plantillas.Keys -join ', ')"
+Write-Host ''
 Write-Host "Usuarios: $($usuarios.Count) | Grupos: $($grupos.Count) | Apps: $($aplicaciones.Count) | Roles: $($roles.Count)"
 Write-Host ''
-Write-LabInfoSafe 'Los JSON NO contienen contrasenas. Se derivan en creauto.ps1 / creamanual.ps1 desde la semilla local.'
-Write-LabWarnSafe 'Anade escenarios/.secrets/ a .gitignore para no subir las semillas a GitHub.'
+Write-InfoLocal 'Los JSON NO contienen contrasenas. Se derivan en creauto.ps1 / creamanual.ps1 desde la semilla local.'
+Write-WarnLocal 'Anade escenarios/.secrets/ a .gitignore para no subir las semillas a GitHub.'

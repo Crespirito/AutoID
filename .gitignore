@@ -16,13 +16,14 @@ manifiesto_lab*.json
 
 # Logs de creación y limpieza
 log_*.csv
+log_creauto_*.csv
 log_cleanup_*.csv
 log_personalizada_*.csv
 
 # ============================================================
 # CONFIGURACIÓN LOCAL DEL MENÚ
 # ============================================================
-# menu_config.json es estado local del operador (Verbose, etc.).
+# menu_config.json es estado local del operador (Verbose, App-Only).
 # No debe versionarse.
 menu_config.json
 
@@ -42,11 +43,11 @@ biblioteca.json
 # descoméntalas.
 # escenarios/escenario/
 # escenarios/vulnerab/
+# escenarios/plantillas/
 
 # ============================================================
 # OTROS ARTEFACTOS DE EJECUCIÓN
 # ============================================================
-# Logs y temporales de PowerShell
 *.log
 *.tmp
 *.bak
@@ -54,10 +55,7 @@ biblioteca.json
 # ============================================================
 # ENTORNOS DE DESARROLLO
 # ============================================================
-# VS Code
 .vscode/
-
-# Visual Studio
 .vs/
 *.user
 *.suo
@@ -65,12 +63,7 @@ biblioteca.json
 # ============================================================
 # SISTEMA OPERATIVO
 # ============================================================
-# Windows
 Thumbs.db
 Desktop.ini
-
-# macOS
 .DS_Store
-
-# Linux
 *~

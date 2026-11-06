@@ -2,30 +2,52 @@
 .SYNOPSIS
     Limpieza de entornos de laboratorio en Entra ID.
 .DESCRIPTION
-    Lee el manifiesto JSON generado por los scripts de creación y elimina
-    todos los objetos creados. El orden es:
-      1. Revertir vulnerabilidades aplicadas (owners, credenciales, PIM, etc.)
-      2. Eliminar aplicaciones y service principals
-      3. Eliminar grupos (vaciando miembros y owners)
-      4. Eliminar usuarios
-    Este orden rompe dependencias y evita errores de "objeto en uso".
+    Lee el manifiesto generado por los scripts de creación y revierte
+    todos los objetos creados.
 
-    La sesión de Microsoft Graph la gestiona menu.ps1. Este script NO
-    conecta ni desconecta; solo verifica que hay sesión activa y falla
-    con código 1 si no la hay.
+    Orden de borrado (gestionado por Invoke-LabReversion):
+      1. Vulnerabilidades aplicadas (owners, credenciales, roles PIM).
+      2. Objetos en orden inverso de creación (LIFO).
+      3. Cada objeto se revierte llamando a la capacidad que lo creó.
+
+    SEGURIDAD:
+    - Antes de borrar cada objeto, se verifica que el objectId del
+      manifiesto coincide con el actual. Si no coincide (objeto borrado
+      y recreado externamente), se omite y se avisa.
+    - Los objetos con estado 'preexistente' se ignoran. Eran anteriores
+      al laboratorio y no se tocan.
+    - Si una capacidad no está registrada (carpeta desactivada), el
+      objeto se deja en el manifiesto con estado 'no-revertido' y se avisa.
+
+    SOFT-DELETE:
+    Remove-MgUser, Remove-MgGroup, Remove-MgApplication y
+    Remove-MgServicePrincipal hacen soft-delete. Los objetos se pueden
+    restaurar durante 30 dias desde el portal de Entra ID o con
+    Restore-MgDirectoryDeletedItem.
+    Nota: restaurar una aplicacion no restaura automaticamente su
+    service principal; hay que restaurarlos por separado.
+
+    La sesion de Graph la gestiona menu.ps1. Este script NO conecta ni
+    desconecta; solo verifica que hay sesion activa.
 .PARAMETER ManifiestoPath
-    Ruta del manifiesto a procesar. Si se omite, se usa el manifiesto
-    estándar en la carpeta del script.
+    Ruta del manifiesto a procesar. Si se omite, se usa el estandar.
 .PARAMETER Forzar
-    Si se especifica, no pide confirmación al usuario antes de eliminar.
+    Si se especifica, para objetos cuya capacidad no esta registrada,
+    intenta un borrado generico por tipo. No se recomienda: puede borrar
+    objetos que no son del laboratorio si el objectId no coincide.
 .NOTES
-    Depende de lib_ui.ps1 y lib_manifiesto.ps1.
+    Depende de lib_ui.ps1, lib_graph.ps1, lib_config.ps1,
+    lib_manifiesto.ps1, lib_escenarios.ps1, lib_niveles.ps1,
+    lib_caps.ps1, lib_creadores.ps1.
 #>
 #Requires -Version 5.1
 
 [CmdletBinding()]
-param (
+param(
+    [Parameter(Mandatory = $false)]
     [string]$ManifiestoPath = $null,
+
+    [Parameter(Mandatory = $false)]
     [switch]$Forzar
 )
 
@@ -36,104 +58,97 @@ $ErrorActionPreference = 'Stop'
 # CARGA DE LIBRERÍAS
 # ============================================================
 . (Join-Path $PSScriptRoot 'lib_ui.ps1')
+. (Join-Path $PSScriptRoot 'lib_graph.ps1')
+. (Join-Path $PSScriptRoot 'lib_config.ps1')
 . (Join-Path $PSScriptRoot 'lib_manifiesto.ps1')
+. (Join-Path $PSScriptRoot 'lib_escenarios.ps1')
+. (Join-Path $PSScriptRoot 'lib_niveles.ps1')
+. (Join-Path $PSScriptRoot 'lib_caps.ps1')
+. (Join-Path $PSScriptRoot 'lib_creadores.ps1')
 
 # ============================================================
-# VERIFICACIÓN DE SESIÓN (gestionada por el menú)
+# VERIFICACIÓN DE SESIÓN
 # ============================================================
-if (-not (Get-MgContext -ErrorAction SilentlyContinue)) {
+if (-not (Test-LabGraphSession)) {
     Write-LabError 'No hay sesión de Graph activa. Ejecuta este script desde menu.ps1.'
     exit 1
 }
 
-# Resolver ruta del manifiesto
+# ============================================================
+# CONFIGURACIÓN Y CAPACIDADES
+# ============================================================
+$config = Get-LabConfig
+$null = Initialize-LabCapacidades -Root (Join-Path $PSScriptRoot 'lib_caps')
+
 if (-not $ManifiestoPath) {
     $ManifiestoPath = Get-LabManifiestoPath
 }
 
 # ============================================================
-# FASE 0: SISTEMA DE LOG
+# VERIFICACIÓN DEL MANIFIESTO
 # ============================================================
-$log = [System.Collections.Generic.List[object]]::new()
-
-function Add-LogEntry {
-    <#
-    .SYNOPSIS
-        Añade una entrada al log interno y la muestra por consola.
-    #>
-    param(
-        [Parameter(Mandatory = $true)]
-        [string]$Categoria,
-
-        [Parameter(Mandatory = $true)]
-        [string]$Mensaje,
-
-        [Parameter(Mandatory = $false)]
-        [object]$Detalle = $null
-    )
-
-    $log.Add([pscustomobject]@{
-        Timestamp = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'
-        Categoria = $Categoria
-        Mensaje   = $Mensaje
-        Detalle   = $Detalle
-    })
-
-    switch ($Categoria) {
-        'Error'   { Write-LabError $Mensaje }
-        'Warning' { Write-LabWarn  $Mensaje }
-        default   { Write-LabInfo  $Mensaje }
-    }
+if (-not (Test-Path -Path $ManifiestoPath)) {
+    Write-LabError "No se encuentra el manifiesto: $ManifiestoPath"
+    Write-LabInfo 'Asegúrate de que el script de creación se ejecutó correctamente.'
+    exit 1
 }
 
 # ============================================================
-# FASE 1: LECTURA DEL MANIFIESTO
+# CARGA DEL MANIFIESTO
 # ============================================================
 Write-LabBanner 'Iniciando limpieza del laboratorio'
 
-if (-not (Test-Path -Path $ManifiestoPath)) {
-    Add-LogEntry -Categoria 'Error' -Mensaje 'No se encuentra el manifiesto.' -Detalle $ManifiestoPath
-    Write-Host 'Asegúrate de que el script de creación se ejecutó correctamente.' -ForegroundColor Gray
-    exit 1
-}
-
 try {
     $manifiesto = Get-LabManifiesto -Path $ManifiestoPath
-    Add-LogEntry -Categoria 'Info' -Mensaje 'Manifiesto cargado correctamente.' -Detalle @{
-        Fecha    = $manifiesto.Fecha
-        Tenant   = $manifiesto.TenantDomain
-        Usuarios = $manifiesto.Usuarios.Count
-        Grupos   = $manifiesto.Grupos.Count
-        Apps     = $manifiesto.Aplicaciones.Count
-        SPs      = $manifiesto.ServicePrincipals.Count
-    }
 } catch {
-    Add-LogEntry -Categoria 'Error' -Mensaje 'Error al leer el manifiesto.' -Detalle $_.Exception.Message
+    Write-LabError "No se pudo leer el manifiesto: $($_.Exception.Message)"
+    exit 1
+}
+
+if ($null -eq $manifiesto) {
+    Write-LabError 'El manifiesto está vacío o no se pudo cargar.'
     exit 1
 }
 
 # ============================================================
-# FASE 2: RESUMEN Y CONFIRMACIÓN
+# RESUMEN Y CONFIRMACIÓN
 # ============================================================
+$pendientes = Get-LabManifiestoPendientes -Manifiesto $manifiesto
+
 Write-Host ''
 Write-Host '--- Contenido del manifiesto ---' -ForegroundColor Yellow
-Write-Host "  Fecha del manifiesto : $($manifiesto.Fecha)"
-Write-Host "  Tenant               : $($manifiesto.TenantDomain)"
-Write-Host "  Usuarios             : $($manifiesto.Usuarios.Count)"
-Write-Host "  Grupos               : $($manifiesto.Grupos.Count)"
-Write-Host "  Aplicaciones         : $($manifiesto.Aplicaciones.Count)"
-Write-Host "  Service Principals   : $($manifiesto.ServicePrincipals.Count)"
-
-# Vulnerabilidades: puede no existir la propiedad si el manifiesto es de una versión anterior
-$vulns = @()
-if ($manifiesto.PSObject.Properties['Vulnerabilidades']) {
-    $vulns = @($manifiesto.Vulnerabilidades)
-}
-Write-Host "  Vulnerabilidades     : $($vulns.Count)"
+Write-Host "  Versión           : $($manifiesto.manifestVersion)"
+Write-Host "  Fecha             : $($manifiesto.fecha)"
+Write-Host "  Tenant            : $($manifiesto.tenantDomain)"
+Write-Host "  Nivel             : $($manifiesto.nivel)"
+Write-Host "  Escenario         : $($manifiesto.escenario)"
+Write-Host "  Objetos totales   : $($manifiesto.objetos.Count)"
+Write-Host "  Objetos pendientes: $($pendientes.objetos.Count)" -ForegroundColor Yellow
+Write-Host "  Vulnerabilidades pendientes: $($pendientes.vulnerabilidades.Count)" -ForegroundColor Yellow
 Write-Host ''
 
+$porCapacidad = @{}
+foreach ($o in $pendientes.objetos) {
+    $cap = if ($o.capacidad) { $o.capacidad } else { 'Desconocida' }
+    if (-not $porCapacidad.ContainsKey($cap)) { $porCapacidad[$cap] = 0 }
+    $porCapacidad[$cap]++
+}
+if ($porCapacidad.Count -gt 0) {
+    Write-Host '  Objetos pendientes por capacidad:' -ForegroundColor Cyan
+    foreach ($cap in $porCapacidad.Keys) {
+        Write-Host "    $cap : $($porCapacidad[$cap])"
+    }
+    Write-Host ''
+}
+
+if ($pendientes.objetos.Count -eq 0 -and $pendientes.vulnerabilidades.Count -eq 0) {
+    Write-LabOk 'No hay objetos pendientes de revertir en el manifiesto.'
+    exit 0
+}
+
 if (-not $Forzar) {
-    Write-Host '¿Estás seguro de que quieres ELIMINAR todos estos objetos?' -ForegroundColor Yellow
+    Write-Host '¿Estás seguro de que quieres REVERTIR todos estos objetos?' -ForegroundColor Yellow
+    Write-Host 'Los objetos preexistentes y los ya revertidos se ignoran.' -ForegroundColor Gray
     $confirmacion = Read-Host "Escribe 'SI' para confirmar"
     if ($confirmacion -ne 'SI') {
         Write-LabInfo 'Operación cancelada por el usuario.'
@@ -142,249 +157,76 @@ if (-not $Forzar) {
 }
 
 # ============================================================
-# FASE 3: REVERSIÓN DE VULNERABILIDADES
+# REVERSIÓN
 # ============================================================
-# Se revierten ANTES de borrar objetos, para que las relaciones
-# (owners, credenciales, PIM) desaparezcan limpiamente.
-if ($vulns.Count -gt 0) {
-    Write-LabBanner 'Revirtiendo vulnerabilidades aplicadas'
+Write-LabBanner 'Revirtiendo objetos del manifiesto'
 
-    foreach ($v in $vulns) {
-        try {
-            $tipo = $v.tipo
-            $afectados = @($v.objetosAfectados)
+$resultado = Invoke-LabReversion -Manifiesto $manifiesto -Config $config -Forzar:$Forzar
 
-            Write-Host "  Revirtiendo: $($v.nombre) ($tipo)" -ForegroundColor Gray
+# ============================================================
+# RESUMEN DE REVERSIÓN
+# ============================================================
+Write-Host ''
+Write-Host '--- Resumen de reversión ---' -ForegroundColor Cyan
+Write-Host "  Revertidos     : $($resultado.Revertidos)" -ForegroundColor Green
+Write-Host "  Fallidos       : $($resultado.Fallidos)" -ForegroundColor Red
+Write-Host "  Omitidos       : $($resultado.Omitidos)" -ForegroundColor Yellow
+Write-Host "  Preexistentes  : $($resultado.Preexistentes)" -ForegroundColor DarkGray
+Write-Host ''
 
-            switch ($tipo) {
-                'ServicePrincipalOwner' {
-                    foreach ($o in $afectados) {
-                        try {
-                            $null = Remove-MgServicePrincipalOwnerByRef -ServicePrincipalId $o.servicePrincipalId -DirectoryObjectId $o.directoryObjectId -Confirm:$false -ErrorAction Stop
-                            Add-LogEntry -Categoria 'Info' -Mensaje 'Owner de SP revertido.' -Detalle $o
-                        } catch {
-                            Add-LogEntry -Categoria 'Warning' -Mensaje 'No se pudo revertir owner de SP.' -Detalle @{ Objeto = $o; Error = $_.Exception.Message }
-                        }
-                    }
-                }
-                'GroupOwner' {
-                    foreach ($o in $afectados) {
-                        try {
-                            $null = Remove-MgGroupOwnerByRef -GroupId $o.groupId -DirectoryObjectId $o.directoryObjectId -Confirm:$false -ErrorAction Stop
-                            Add-LogEntry -Categoria 'Info' -Mensaje 'Owner de grupo revertido.' -Detalle $o
-                        } catch {
-                            Add-LogEntry -Categoria 'Warning' -Mensaje 'No se pudo revertir owner de grupo.' -Detalle @{ Objeto = $o; Error = $_.Exception.Message }
-                        }
-                    }
-                }
-                'ApplicationSecret' {
-                    foreach ($o in $afectados) {
-                        try {
-                            $null = Remove-MgApplicationPassword -ApplicationId $o.applicationId -KeyId $o.keyId -Confirm:$false -ErrorAction Stop
-                            Add-LogEntry -Categoria 'Info' -Mensaje 'Credencial de app revertida.' -Detalle $o
-                        } catch {
-                            Add-LogEntry -Categoria 'Warning' -Mensaje 'No se pudo revertir credencial de app.' -Detalle @{ Objeto = $o; Error = $_.Exception.Message }
-                        }
-                    }
-                }
-                'PimEligibleRole' {
-                    foreach ($o in $afectados) {
-                        try {
-                            $requests = Get-MgRoleManagementDirectoryRoleEligibilityScheduleRequest `
-                                -Filter "principalId eq '$($o.principalId)'" -All -ErrorAction Stop
+# ============================================================
+# GUARDAR MANIFIESTO ACTUALIZADO
+# ============================================================
+if (Save-LabManifiesto -Manifiesto $manifiesto -Path $ManifiestoPath) {
+    Write-LabInfo "Manifiesto actualizado con el estado de reversión: $ManifiestoPath"
+} else {
+    Write-LabError 'No se pudo guardar el manifiesto actualizado.'
+}
 
-                            foreach ($r in @($requests)) {
-                                $null = Remove-MgRoleManagementDirectoryRoleEligibilityScheduleRequest `
-                                    -UnifiedRoleEligibilityScheduleRequestId $r.Id `
-                                    -Confirm:$false -ErrorAction Stop
-                            }
-                            Add-LogEntry -Categoria 'Info' -Mensaje 'Rol PIM revertido.' -Detalle $o
-                        } catch {
-                            Add-LogEntry -Categoria 'Warning' -Mensaje 'No se pudo revertir rol PIM.' -Detalle @{ Objeto = $o; Error = $_.Exception.Message }
-                        }
-                    }
-                }
-                default {
-                    Add-LogEntry -Categoria 'Warning' -Mensaje 'Tipo de vulnerabilidad desconocido; se omite reversión.' -Detalle $tipo
-                }
-            }
-        } catch {
-            Add-LogEntry -Categoria 'Error' -Mensaje 'Error al revertir vulnerabilidad.' -Detalle @{
-                Vulnerabilidad = $v.nombre
-                Error          = $_.Exception.Message
-            }
-        }
+# ============================================================
+# RENOMBRAR SI TODO SE REVIRTIÓ
+# ============================================================
+$quedanPendientes = Get-LabManifiestoPendientes -Manifiesto $manifiesto
+if ($quedanPendientes.objetos.Count -eq 0 -and $quedanPendientes.vulnerabilidades.Count -eq 0) {
+    $manifiestoProcesado = Rename-LabManifiestoProcesado
+    if ($manifiestoProcesado) {
+        Write-LabOk "Manifiesto renombrado como procesado: $manifiestoProcesado"
     }
 } else {
-    Write-LabInfo 'No hay vulnerabilidades registradas en el manifiesto.'
+    Write-LabWarn "Quedan $($quedanPendientes.objetos.Count) objetos y $($quedanPendientes.vulnerabilidades.Count) vulnerabilidades pendientes. El manifiesto se conserva para reintentar."
+    Write-LabInfo 'Revisa los avisos anteriores y vuelve a ejecutar la limpieza.'
 }
 
 # ============================================================
-# FASE 4: ELIMINACIÓN DE APLICACIONES Y SERVICE PRINCIPALS
-# ============================================================
-Write-LabBanner 'Eliminando aplicaciones y service principals'
-
-foreach ($nombreApp in $manifiesto.Aplicaciones) {
-    try {
-        $app = Get-MgApplication -Filter "displayName eq '$nombreApp'" -ErrorAction Stop
-
-        if ($app) {
-            if ($app -is [array]) { $app = $app[0] }
-
-            Write-Host "  Procesando aplicación: $nombreApp" -ForegroundColor Gray
-
-            # 1. Eliminar SP asociado
-            $sp = Get-MgServicePrincipal -Filter "appId eq '$($app.AppId)'" -ErrorAction SilentlyContinue
-            if ($sp) {
-                if ($sp -is [array]) { $sp = $sp[0] }
-
-                $asignaciones = Get-MgServicePrincipalAppRoleAssignedTo -ServicePrincipalId $sp.Id -All -ErrorAction SilentlyContinue
-                foreach ($asig in $asignaciones) {
-                    $null = Remove-MgServicePrincipalAppRoleAssignedTo -ServicePrincipalId $sp.Id -AppRoleAssignmentId $asig.Id -Confirm:$false -ErrorAction SilentlyContinue
-                }
-
-                $null = Remove-MgServicePrincipal -ServicePrincipalId $sp.Id -Confirm:$false -ErrorAction Stop
-                Add-LogEntry -Categoria 'Info' -Mensaje 'Service Principal eliminado.' -Detalle $sp.Id
-            }
-
-            # 2. Eliminar la aplicación
-            $null = Remove-MgApplication -ApplicationId $app.Id -Confirm:$false -ErrorAction Stop
-            Add-LogEntry -Categoria 'Info' -Mensaje 'Aplicación eliminada.' -Detalle $nombreApp
-        } else {
-            Add-LogEntry -Categoria 'Warning' -Mensaje 'Aplicación no encontrada.' -Detalle $nombreApp
-        }
-    } catch {
-        Add-LogEntry -Categoria 'Error' -Mensaje 'Error al eliminar aplicación.' -Detalle @{
-            App   = $nombreApp
-            Error = $_.Exception.Message
-        }
-    }
-}
-
-# SPs huérfanos registrados directamente en el manifiesto
-foreach ($spId in $manifiesto.ServicePrincipals) {
-    try {
-        $sp = Get-MgServicePrincipal -ServicePrincipalId $spId -ErrorAction SilentlyContinue
-        if ($sp) {
-            if ($sp -is [array]) { $sp = $sp[0] }
-            $asignaciones = Get-MgServicePrincipalAppRoleAssignedTo -ServicePrincipalId $spId -All -ErrorAction SilentlyContinue
-            foreach ($asig in $asignaciones) {
-                $null = Remove-MgServicePrincipalAppRoleAssignedTo -ServicePrincipalId $spId -AppRoleAssignmentId $asig.Id -Confirm:$false -ErrorAction SilentlyContinue
-            }
-            $null = Remove-MgServicePrincipal -ServicePrincipalId $spId -Confirm:$false -ErrorAction Stop
-            Add-LogEntry -Categoria 'Info' -Mensaje 'Service Principal huérfano eliminado.' -Detalle $spId
-        }
-    } catch {
-        Add-LogEntry -Categoria 'Warning' -Mensaje 'No se pudo eliminar SP huérfano.' -Detalle @{
-            SP    = $spId
-            Error = $_.Exception.Message
-        }
-    }
-}
-
-# ============================================================
-# FASE 5: ELIMINACIÓN DE GRUPOS
-# ============================================================
-Write-LabBanner 'Eliminando grupos'
-
-foreach ($nombreGrupo in $manifiesto.Grupos) {
-    try {
-        $grupo = Get-MgGroup -Filter "displayName eq '$nombreGrupo'" -ErrorAction Stop
-        if ($grupo -is [array]) { $grupo = $grupo[0] }
-
-        if ($grupo) {
-            Write-Host "  Procesando grupo: $nombreGrupo" -ForegroundColor Gray
-
-            # Vaciar miembros
-            $miembros = Get-MgGroupMember -GroupId $grupo.Id -All -ErrorAction SilentlyContinue
-            foreach ($miembro in $miembros) {
-                $null = Remove-MgGroupMemberByRef -GroupId $grupo.Id -DirectoryObjectId $miembro.Id -Confirm:$false -ErrorAction SilentlyContinue
-            }
-
-            # Eliminar propietarios
-            $propietarios = Get-MgGroupOwner -GroupId $grupo.Id -All -ErrorAction SilentlyContinue
-            foreach ($prop in $propietarios) {
-                $null = Remove-MgGroupOwnerByRef -GroupId $grupo.Id -DirectoryObjectId $prop.Id -Confirm:$false -ErrorAction SilentlyContinue
-            }
-
-            # Eliminar grupo
-            $null = Remove-MgGroup -GroupId $grupo.Id -Confirm:$false -ErrorAction Stop
-            Add-LogEntry -Categoria 'Info' -Mensaje 'Grupo eliminado.' -Detalle $nombreGrupo
-        } else {
-            Add-LogEntry -Categoria 'Warning' -Mensaje 'Grupo no encontrado.' -Detalle $nombreGrupo
-        }
-    } catch {
-        Add-LogEntry -Categoria 'Error' -Mensaje 'Error al eliminar grupo.' -Detalle @{
-            Grupo = $nombreGrupo
-            Error = $_.Exception.Message
-        }
-    }
-}
-
-# ============================================================
-# FASE 6: ELIMINACIÓN DE USUARIOS
-# ============================================================
-Write-LabBanner 'Eliminando usuarios'
-
-foreach ($upn in $manifiesto.Usuarios) {
-    try {
-        $usuario = Get-MgUser -UserId $upn -ErrorAction SilentlyContinue
-        if ($usuario) {
-            if ($usuario -is [array]) { $usuario = $usuario[0] }
-            $null = Remove-MgUser -UserId $upn -Confirm:$false -ErrorAction Stop
-            Add-LogEntry -Categoria 'Info' -Mensaje 'Usuario eliminado.' -Detalle $upn
-        } else {
-            Add-LogEntry -Categoria 'Warning' -Mensaje 'Usuario no encontrado.' -Detalle $upn
-        }
-    } catch {
-        Add-LogEntry -Categoria 'Error' -Mensaje 'Error al eliminar usuario.' -Detalle @{
-            Usuario = $upn
-            Error   = $_.Exception.Message
-        }
-    }
-}
-
-# ============================================================
-# FASE 7: RENOMBRAR EL MANIFIESTO COMO PROCESADO
-# ============================================================
-try {
-    $esEstandar = ($ManifiestoPath -eq (Get-LabManifiestoPath))
-    if ($esEstandar) {
-        $manifiestoProcesado = Rename-LabManifiestoProcesado
-        if ($manifiestoProcesado) {
-            Add-LogEntry -Categoria 'Info' -Mensaje 'Manifiesto renombrado como procesado.' -Detalle $manifiestoProcesado
-        } else {
-            Add-LogEntry -Categoria 'Warning' -Mensaje 'No se pudo renombrar el manifiesto estándar.'
-        }
-    } else {
-        $manifiestoProcesado = $ManifiestoPath -replace '\.json$', "_procesado_$(Get-Date -Format 'yyyyMMdd_HHmmss').json"
-        $null = Move-Item -Path $ManifiestoPath -Destination $manifiestoProcesado -Force
-        Add-LogEntry -Categoria 'Info' -Mensaje 'Manifiesto renombrado como procesado.' -Detalle $manifiestoProcesado
-    }
-} catch {
-    Add-LogEntry -Categoria 'Warning' -Mensaje 'No se pudo renombrar el manifiesto.' -Detalle $_.Exception.Message
-}
-
-# ============================================================
-# FASE 8: VOLCADO DEL LOG Y RESUMEN
+# VOLCADO DEL LOG
 # ============================================================
 $logPath = Join-Path $PSScriptRoot "log_cleanup_$(Get-Date -Format 'yyyyMMdd_HHmmss').csv"
 
 try {
-    $log | Export-Csv -Path $logPath -NoTypeInformation -Encoding UTF8
+    $resumen = @()
+    foreach ($o in $manifiesto.objetos) {
+        $resumen += [pscustomobject]@{
+            id        = $o.id
+            tipo      = $o.tipo
+            capacidad = $o.capacidad
+            estado    = $o.estado
+        }
+    }
+    foreach ($v in $manifiesto.vulnerabilidades) {
+        $resumen += [pscustomobject]@{
+            id        = $v.id
+            tipo      = "Vulnerabilidad: $($v.tipo)"
+            capacidad = $v.capacidad
+            estado    = $v.estado
+        }
+    }
+    if ($resumen.Count -gt 0) {
+        $resumen | Export-Csv -Path $logPath -NoTypeInformation -Encoding UTF8
+        Write-Host "Log completo: $logPath" -ForegroundColor Gray
+    }
 } catch {
-    Write-LabError "No se pudo guardar el log en $logPath : $($_.Exception.Message)"
+    Write-LabWarn "No se pudo guardar el log en $logPath : $($_.Exception.Message)"
 }
 
-$errores = ($log | Where-Object Categoria -eq 'Error').Count
-$avisos  = ($log | Where-Object Categoria -eq 'Warning').Count
-$total   = $log.Count
-
-Write-Host ''
-Write-Host '--- Resumen de limpieza ---' -ForegroundColor Cyan
-Write-Host "Eventos totales: $total"
-Write-Host "Avisos:          $avisos" -ForegroundColor Yellow
-Write-Host "Errores:         $errores" -ForegroundColor Red
-Write-Host "Log completo:    $logPath" -ForegroundColor Gray
 Write-Host ''
 Write-LabOk 'Limpieza completada.'
