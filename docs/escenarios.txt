@@ -8,11 +8,17 @@ etc. El programa lo lee, lo normaliza y lo pasa a las capacidades para que cada
 una cree su parte.
 
 Este documento explica el formato del JSON, las secciones por capacidad, los
-alias aceptados, las plantillas y el modelo de semilla y contrasenas.
+alias aceptados, las plantillas y el modelo de semilla y contraseñas.
+
+NOTA SOBRE VULNERABILIDADES:
+Las vulnerabilidades NO forman parte del escenario. Son modificaciones
+maliciosas que se aplican sobre objetos existentes y tienen su propio flujo
+(menu.ps1 [5]). Su formato, catálogo y ciclo de vida se documentan en
+docs/vulnerabilidades.md.
 
 
 -------------------------------------------------------------------------------
-1. ESTRUCTURA BASICA DEL JSON
+1. ESTRUCTURA BÁSICA DEL JSON
 -------------------------------------------------------------------------------
 
 Un escenario es un objeto JSON con metadatos y una o varias secciones:
@@ -36,9 +42,9 @@ CAMPOS DE METADATOS (opcionales, pero recomendados):
         Texto libre. Se muestra en el resumen antes de crear.
 
     version
-        Version del formato. Por defecto "1.0".
+        Versión del formato. Por defecto "1.0".
 
-Cada seccion es un array de objetos. Si el JSON trae un objeto suelto en lugar
+Cada sección es un array de objetos. Si el JSON trae un objeto suelto en lugar
 de un array, el normalizador lo envuelve en @(...). Si trae null, lo convierte
 en @().
 
@@ -47,7 +53,7 @@ en @().
 2. SECCIONES POR CAPACIDAD
 -------------------------------------------------------------------------------
 
-Cada seccion corresponde a una capacidad. El nombre de la seccion es el
+Cada sección corresponde a una capacidad. El nombre de la sección es el
 SeccionJson de la capacidad. Los alias permiten usar nombres alternativos.
 
 2.1. USUARIOS  (seccion: usuarios, alias: Usuarios)
@@ -67,7 +73,7 @@ SeccionJson de la capacidad. Los alias permiten usar nombres alternativos.
         department, jobTitle
 
     El marcador {tenant} se sustituye por el dominio del tenant en tiempo de
-    creacion. La contrasena NO va en el JSON: se deriva de la semilla.
+    creación. La contraseña NO va en el JSON: se deriva de la semilla.
 
 
 2.2. GRUPOS  (seccion: grupos, alias: Grupos)
@@ -124,7 +130,7 @@ SeccionJson de la capacidad. Los alias permiten usar nombres alternativos.
 
 2.5. APPROLES  (seccion: appRoles, alias: app_roles)
 
-    Definicion de rol:
+    Definición de rol:
 
         {
           "aplicacion": "Panel de Analisis Comercial",
@@ -133,7 +139,7 @@ SeccionJson de la capacidad. Los alias permiten usar nombres alternativos.
           "allowedMemberTypes": [ "User" ]
         }
 
-    Asignacion de rol:
+    Asignación de rol:
 
         {
           "aplicacion": "Panel de Analisis Comercial",
@@ -141,13 +147,13 @@ SeccionJson de la capacidad. Los alias permiten usar nombres alternativos.
           "principal": "lucia.g@{tenant}"
         }
 
-    El normalizador distingue definicion de asignacion por la presencia de
-    "principal". Si tiene principal, es asignacion; si no, es definicion.
+    El normalizador distingue definición de asignación por la presencia de
+    "principal". Si tiene principal, es asignación; si no, es definición.
 
-    Campos obligatorios (definicion):
+    Campos obligatorios (definición):
         aplicacion, displayName, value
 
-    Campos obligatorios (asignacion):
+    Campos obligatorios (asignación):
         aplicacion, value, principal
 
     allowedMemberTypes:
@@ -166,9 +172,9 @@ SeccionJson de la capacidad. Los alias permiten usar nombres alternativos.
         aplicacion, displayName
 
     Campos opcionales:
-        endDateTime (por defecto, un ano desde la creacion)
+        endDateTime (por defecto, un año desde la creación)
 
-    El SECRETO no va en el JSON. Se genera en la creacion y se muestra UNA
+    El SECRETO no va en el JSON. Se genera en la creación y se muestra UNA
     SOLA VEZ al operador.
 
 
@@ -204,27 +210,7 @@ SeccionJson de la capacidad. Los alias permiten usar nombres alternativos.
         redirectUrl, sendMessage
 
 
-2.9. VULNERABILIDADES  (seccion: vulnerabilidades, alias: vulnerability)
-
-    {
-      "nombre": "escenarioej1_sp_owner",
-      "tipo": "ServicePrincipalOwner",
-      "parametros": {
-        "usuario": "lucia.g@{tenant}",
-        "aplicacion": "Panel de Analisis Comercial"
-      }
-    }
-
-    Tipos soportados:
-        ServicePrincipalOwner
-        GroupOwner
-        ApplicationSecret
-        PimEligibleRole
-
-    Cada tipo tiene sus propios parametros. Ver docs/capacidades.txt.
-
-
-2.10. ADMINISTRATIVEUNITS  (seccion: administrativeUnits, solo P1+)
+2.9. ADMINISTRATIVEUNITS  (seccion: administrativeUnits, solo P1+)
 
     {
       "displayName": "AU Ventas",
@@ -242,7 +228,7 @@ SeccionJson de la capacidad. Los alias permiten usar nombres alternativos.
         description, members, roles
 
 
-2.11. GRUPOSDINAMICOS  (seccion: gruposDinamicos, solo P1+)
+2.10. GRUPOSDINAMICOS  (seccion: gruposDinamicos, solo P1+)
 
     {
       "displayName": "Dinamico Guests",
@@ -258,7 +244,7 @@ SeccionJson de la capacidad. Los alias permiten usar nombres alternativos.
         description, processingState (On o Paused; por defecto On)
 
 
-2.12. GRUPOSROLEASSIGNABLE  (seccion: gruposRoleAssignable, solo P1+)
+2.11. GRUPOSROLEASSIGNABLE  (seccion: gruposRoleAssignable, solo P1+)
 
     {
       "displayName": "RoleAssignable Ventas",
@@ -269,7 +255,7 @@ SeccionJson de la capacidad. Los alias permiten usar nombres alternativos.
         displayName
 
 
-2.13. LICENCIAS  (seccion: licencias, solo P1+)
+2.12. LICENCIAS  (seccion: licencias, solo P1+)
 
     {
       "usuario": "lucia.g@{tenant}",
@@ -287,7 +273,7 @@ SeccionJson de la capacidad. Los alias permiten usar nombres alternativos.
     tenant no tiene el SKU, se avisa y se omite.
 
 
-2.14. ACCESOCONDICIONAL  (seccion: accesoCondicional, solo P1+)
+2.13. ACCESOCONDICIONAL  (seccion: accesoCondicional, solo P1+)
 
     {
       "displayName": "CA MFA para admins",
@@ -313,7 +299,7 @@ SeccionJson de la capacidad. Los alias permiten usar nombres alternativos.
     manualmente tras revisar.
 
 
-2.15. METODOSAUTH  (seccion: metodosAuth, solo P1+)
+2.14. METODOSAUTH  (seccion: metodosAuth, solo P1+)
 
     {
       "usuario": "lucia.g@{tenant}",
@@ -329,11 +315,11 @@ SeccionJson de la capacidad. Los alias permiten usar nombres alternativos.
         isUsableOnce (por defecto true),
         startDateTime
 
-    El CODIGO TAP no va en el JSON. Se genera en la creacion y se muestra UNA
+    El CÓDIGO TAP no va en el JSON. Se genera en la creación y se muestra UNA
     SOLA VEZ.
 
 
-2.16. PIM  (seccion: pim, solo P2)
+2.15. PIM  (seccion: pim, solo P2)
 
     {
       "usuario": "lucia.g@{tenant}",
@@ -356,9 +342,9 @@ SeccionJson de la capacidad. Los alias permiten usar nombres alternativos.
 
 Cada capacidad declara un SeccionJson y, opcionalmente, una lista de Alias. El
 normalizador prueba primero el SeccionJson y luego cada alias. Eso permite
-compatibilidad con escenarios escritos en espanol o en versiones anteriores.
+compatibilidad con escenarios escritos en español o en versiones anteriores.
 
-    CAPACIDAD            SECCION JSON         ALIAS
+    CAPACIDAD            SECCIÓN JSON         ALIAS
     -------------------  -------------------  --------------------------------
     Usuarios             usuarios             Usuarios
     Grupos               grupos               Grupos
@@ -368,7 +354,6 @@ compatibilidad con escenarios escritos en espanol o en versiones anteriores.
     CredencialesApp      credencialesApp      credenciales_app, secrets
     PermisosApi          permisosApi          permisos_api, apiPermissions
     Invitados            invitados            guests
-    Vulnerabilidades     vulnerabilidades     vulnerability
     AdministrativeUnits  administrativeUnits  unidadesAdministrativas,
                                               unidades_administrativas,
                                               adminUnits
@@ -382,13 +367,18 @@ compatibilidad con escenarios escritos en espanol o en versiones anteriores.
                                               authenticationMethods
     Pim                  pim                  PIM, rolesElegibles
 
+NOTA: 'Vulnerabilidades' no aparece en esta tabla porque no es una sección del
+escenario. Sus alias ('vulnerabilidades', 'vulnerabilidad', 'vulnerability',
+'vulns') solo se usan internamente para detectar escenarios antiguos que aún
+tengan esa clave; en ese caso, caerían en Desconocidas y no se aplicarían.
+
 
 -------------------------------------------------------------------------------
 4. PLANTILLAS
 -------------------------------------------------------------------------------
 
 Una PLANTILLA es un escenario normalizado que se usa como esqueleto en el flujo
-de creacion automatica (nivel -> tipo -> crear). Vive en
+de creación automática (nivel -> tipo -> crear). Vive en
 escenarios/plantillas/*.json.
 
 Plantillas generadas por generar_biblioteca.ps1:
@@ -403,12 +393,15 @@ Plantillas generadas por generar_biblioteca.ps1:
     acceso           accesoCondicional, metodosAuth (solo P1+)
     pim              usuarios, pim (solo P2)
 
-Las plantillas no contienen datos: son esqueletos con las secciones vacias.
+Las plantillas no contienen datos: son esqueletos con las secciones vacías.
 El operador las rellena o las usa como base para crear escenarios propios.
+
+Las plantillas NO incluyen vulnerabilidades. Si el operador quiere aplicar
+vulnerabilidades, las crea desde menu.ps1 [5] tras crear el escenario.
 
 
 -------------------------------------------------------------------------------
-5. NORMALIZACION Y VALIDACION
+5. NORMALIZACIÓN Y VALIDACIÓN
 -------------------------------------------------------------------------------
 
 El programa no lee el JSON directamente. Lo pasa por
@@ -427,44 +420,49 @@ secciones posibles:
     }
 
 El normalizador descubre las secciones a partir de las capacidades
-registradas. Si una seccion no la reclama ninguna capacidad, va a Desconocidas
+registradas. Si una sección no la reclama ninguna capacidad, va a Desconocidas
 y se preserva en RawDesconocidas.
 
-La validacion se hace en dos fases:
+CAPACIDADES SIN SECCIÓN:
+Las capacidades con SeccionJson = $null (Vulnerabilidades) no crean entrada
+en Secciones. Si un escenario antiguo tuviera una clave con su Alias, caería
+en Desconocidas y no se procesaría.
 
-    FASE 1: normalizacion
-        JSON valido, secciones son arrays u objetos, version reconocible.
+La validación se hace en dos fases:
+
+    FASE 1: normalización
+        JSON válido, secciones son arrays u objetos, versión reconocible.
         Los problemas van a Errores.
 
-    FASE 2: validacion por capacidad
-        Invoke-LabValidacionEscenario recorre las secciones no vacias y llama
+    FASE 2: validación por capacidad
+        Invoke-LabValidacionEscenario recorre las secciones no vacías y llama
         a ValidarDef de cada capacidad. Devuelve un array de errores.
 
 Si hay errores en cualquier fase, creauto.ps1 aborta antes de crear nada.
 
 
 -------------------------------------------------------------------------------
-6. MODELO DE SEMILLA Y CONTRASENAS
+6. MODELO DE SEMILLA Y CONTRASEÑAS
 -------------------------------------------------------------------------------
 
-Los escenarios NO contienen contrasenas. Cada escenario tiene una semilla local
+Los escenarios NO contienen contraseñas. Cada escenario tiene una semilla local
 en escenarios/.secrets/<escenario>.seed (32 bytes aleatorios en Base64, fuera
-de Git). De ella se deriva la contrasena de cada usuario:
+de Git). De ella se deriva la contraseña de cada usuario:
 
     password = HMAC-SHA256(semilla, upn) -> Base64 -> 16 chars + "!Aa1"
 
 Propiedades:
 
-    - Determinista: misma semilla + mismo UPN -> misma contrasena.
-    - Unica por usuario: cada UPN produce una contrasena distinta.
-    - Reproducible: conservando la semilla, se regeneran las contrasenas.
-    - Fuera de Git: escenarios/.secrets/ esta en .gitignore.
+    - Determinista: misma semilla + mismo UPN -> misma contraseña.
+    - Única por usuario: cada UPN produce una contraseña distinta.
+    - Reproducible: conservando la semilla, se regeneran las contraseñas.
+    - Fuera de Git: escenarios/.secrets/ está en .gitignore.
 
-En creauto.ps1 las contrasenas se generan siempre desde la semilla y se
+En creauto.ps1 las contraseñas se generan siempre desde la semilla y se
 muestran UNA SOLA VEZ al final. En creamanual.ps1 el operador puede
-introducirlas manualmente o generarlas desde la semilla de la sesion.
+introducirlas manualmente o generarlas desde la semilla de la sesión.
 
-En ningun caso la contrasena se guarda en el manifiesto ni en el JSON.
+En ningún caso la contraseña se guarda en el manifiesto ni en el JSON.
 
 
 -------------------------------------------------------------------------------
@@ -504,16 +502,6 @@ En ningun caso la contrasena se guarda en el manifiesto ni en el JSON.
           "tipo": "membresia",
           "usuario": "lucia.g@{tenant}",
           "grupo": "Departamento de Ventas"
-        }
-      ],
-      "vulnerabilidades": [
-        {
-          "nombre": "escenarioej1_sp_owner",
-          "tipo": "ServicePrincipalOwner",
-          "parametros": {
-            "usuario": "lucia.g@{tenant}",
-            "aplicacion": "Panel de Analisis Comercial"
-          }
         }
       ]
     }
@@ -601,12 +589,14 @@ En ningun caso la contrasena se guarda en el manifiesto ni en el JSON.
 -------------------------------------------------------------------------------
 
     - Un escenario es un JSON con metadatos y secciones por capacidad.
-    - Cada seccion es un array de objetos.
-    - Los alias permiten nombres alternativos (espanol, versiones antiguas).
+    - Cada sección es un array de objetos.
+    - Los alias permiten nombres alternativos (español, versiones antiguas).
     - Las plantillas son esqueletos para el flujo nivel -> tipo.
     - El normalizador descubre secciones a partir de las capacidades.
-    - La validacion se hace en dos fases: normalizacion y por capacidad.
-    - Las contrasenas no van en el JSON: se derivan de la semilla local.
-    - El secreto de app y el codigo TAP se muestran una sola vez.
+    - La validación se hace en dos fases: normalización y por capacidad.
+    - Las contraseñas no van en el JSON: se derivan de la semilla local.
+    - El secreto de app y el código TAP se muestran una sola vez.
+    - Las vulnerabilidades NO forman parte del escenario.
+      Ver docs/vulnerabilidades.md.
 
 ===============================================================================

@@ -25,6 +25,20 @@
     Cada sección es siempre un array (nunca $null, nunca objeto suelto).
     Las secciones desconocidas se preservan en RawDesconocidas para que
     ConvertFrom-LabEscenarioNormalizado pueda reconstruirlas sin pérdida.
+
+    CAPACIDADES SIN SECCIONJSON:
+    Algunas capacidades (por ejemplo, Vulnerabilidades) tienen
+    SeccionJson = $null porque no consumen una sección del escenario:
+    se aplican sobre objetos existentes desde un flujo dedicado. Esas
+    capacidades NO crean entrada en Secciones. Si un escenario antiguo
+    tuviera una sección con su Alias, caería en Desconocidas y se
+    preservaría en RawDesconocidas.
+
+    CATÁLOGO DE VULNERABILIDADES:
+    Get-LabVulnerabilidad y Get-LabVulnerabilidadesDisponibles leen el
+    catálogo de escenarios/vulnerab/*.json. Se usan desde
+    cap_vulnerabilidades.ps1 [C] para cargar una vulnerabilidad por
+    nombre y, opcionalmente, sobrescribir sus parámetros.
 .NOTES
     Depende de lib_ui.ps1 y lib_caps.ps1.
     Se carga por dot-sourcing desde menu.ps1.
@@ -92,7 +106,11 @@ function Get-LabEscenariosDisponibles {
 function Get-LabVulnerabilidadesDisponibles {
     <#
     .SYNOPSIS
-        Devuelve los nombres (sin extensión) de las vulnerabilidades disponibles.
+        Devuelve los nombres (sin extensión) de las vulnerabilidades disponibles
+        en el catálogo (escenarios/vulnerab/*.json).
+    .DESCRIPTION
+        Se usa desde cap_vulnerabilidades.ps1 [C] para listar las
+        vulnerabilidades que el operador puede cargar por nombre.
     #>
     if (-not (Test-Path -Path $script:LabVulnerabilidadesPath)) { return @() }
     $files = Get-ChildItem -Path $script:LabVulnerabilidadesPath -Filter '*.json' -File -ErrorAction SilentlyContinue
@@ -122,6 +140,12 @@ function ConvertTo-LabEscenarioNormalizado {
         Descubre las secciones a partir de las capacidades registradas.
         Las secciones no reclamadas por ninguna capacidad van a 'Desconocidas'
         (solo nombres) y sus valores originales a 'RawDesconocidas'.
+
+        Capacidades con SeccionJson = $null (por ejemplo, Vulnerabilidades)
+        no crean entrada en Secciones: se aplican desde un flujo dedicado,
+        no forman parte del escenario. Si un escenario antiguo tuviera una
+        sección con su Alias, caería en Desconocidas y se preservaría en
+        RawDesconocidas.
     .PARAMETER Path
         Ruta de un fichero .json.
     .PARAMETER Raw
@@ -177,8 +201,10 @@ function ConvertTo-LabEscenarioNormalizado {
     foreach ($cap in $capacidades) {
         $nombreCap = $cap.Nombre
 
+        # Capacidades sin SeccionJson (p. ej. Vulnerabilidades) no consumen
+        # sección del escenario: se aplican desde un flujo dedicado. No
+        # creamos entrada en Secciones para evitar ruido en bucles posteriores.
         if ([string]::IsNullOrWhiteSpace($cap.SeccionJson)) {
-            $secciones[$nombreCap] = @()
             continue
         }
 
@@ -309,13 +335,20 @@ function Test-LabEscenarioTieneSecciones {
 }
 
 # ============================================================
-# CARGA DE VULNERABILIDADES
+# CARGA DE VULNERABILIDADES (CATÁLOGO)
 # ============================================================
 
 function Get-LabVulnerabilidad {
     <#
     .SYNOPSIS
-        Carga una vulnerabilidad por nombre.
+        Carga una vulnerabilidad del catálogo por nombre.
+    .DESCRIPTION
+        Lee escenarios/vulnerab/<Nombre>.json y devuelve un objeto con
+        Nombre, Descripcion, Tipo, Parametros y RequiereLicencia.
+
+        Se usa desde cap_vulnerabilidades.ps1 [C] para cargar una
+        vulnerabilidad por nombre y, opcionalmente, sobrescribir sus
+        parámetros.
     .PARAMETER Nombre
         Nombre de la vulnerabilidad (sin extensión).
     .OUTPUTS

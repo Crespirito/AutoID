@@ -24,14 +24,4 @@
       "redirectUris": [ "https://panel.empresa.local/callback" ]
     }
   ],
-  "vulnerabilidades": [
-    {
-      "nombre": "prueba_sp_owner",
-      "tipo": "ServicePrincipalOwner",
-      "parametros": {
-        "usuario": "lucia.g@{tenant}",
-        "aplicacion": "Panel de Analisis Comercial"
-      }
-    }
-  ]
 }

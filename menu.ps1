@@ -9,10 +9,22 @@
         az login pida el usuario en lugar de reutilizar la cuenta de Windows.
       - Configuración persistente (nivel, App-Only).
       - Carga de capacidades desde lib_caps/.
-      - Delegación en creauto.ps1, creamanual.ps1 y clean_up.ps1.
+      - Delegación en creauto.ps1, creamanual.ps1, clean_up.ps1.
+      - Flujo de vulnerabilidades: [5] Crear vulnerabilidad, [6] Ver
+        vulnerabilidades. Las vulnerabilidades NO son una sección del
+        escenario: se aplican sobre objetos existentes y viven en
+        $Manifiesto.vulnerabilidades.
 
     El menú no conoce tipos de objeto: las capacidades se descubren
     dinámicamente desde lib_caps/ y se filtran por nivel y disponibilidad.
+
+    SEPARACIÓN ESCENARIO / VULNERABILIDADES:
+      - Escenario: [1] Creación automática, [2] Creación manual.
+        Objetos creados desde cero. Viven en $Manifiesto.objetos.
+      - Vulnerabilidades: [5] Crear vulnerabilidad.
+        Modificaciones maliciosas sobre objetos existentes. Viven en
+        $Manifiesto.vulnerabilidades.
+      - [3] Limpiar entorno revierte ambas, vulnerabilidades primero.
 .NOTES
     Depende de: lib_ui.ps1, lib_graph.ps1, lib_config.ps1,
     lib_manifiesto.ps1, lib_escenarios.ps1, lib_niveles.ps1,
@@ -324,8 +336,6 @@ function Invoke-GestionSesion {
                 Write-Host ''
                 Write-LabInfo 'Preparando az login para que pida el usuario (desactivando WAM)...'
 
-                # Desactivar Web Account Manager para forzar el flujo de navegador
-                # y limpiar la sesión cacheada de Windows.
                 try {
                     $null = az config set core.enable_broker_on_windows=false 2>$null
                     $null = az account clear 2>$null
@@ -339,14 +349,12 @@ function Invoke-GestionSesion {
                 Write-LabInfo '  az login'
                 Write-Host ''
 
-                # Lanzar az login interactivo (bloquea hasta que el usuario termine)
                 try {
                     $null = az login 2>&1
                 } catch {
                     Write-LabWarn "az login falló o se canceló: $($_.Exception.Message)"
                 }
 
-                # Ahora obtener el token y conectar
                 $conectado = Connect-LabGraphConAzLogin
                 if (-not $conectado) {
                     Write-LabError 'No se pudo conectar vía az login.'
@@ -487,6 +495,221 @@ function Invoke-CrearPersonalizada {
     Wait-LabKey
 }
 
+function Invoke-CrearVulnerabilidad {
+    <#
+    .SYNOPSIS
+        Flujo de creación de una vulnerabilidad.
+    .DESCRIPTION
+        Las vulnerabilidades NO son una sección del escenario. Se aplican
+        sobre objetos existentes y se registran en $Manifiesto.vulnerabilidades.
+
+        Pasos:
+          1. Verificar sesión.
+          2. Obtener la capacidad 'Vulnerabilidades'.
+          3. TestDisponible con nivel efectivo.
+          4. PreguntarUI (solo tipos disponibles).
+          5. ValidarDef.
+          6. Confirmación.
+          7. Construir snapshot pre-lab.
+          8. Crear.
+          9. Registrar cada resultado con Add-LabManifiestoVulnerabilidad.
+         10. Guardar manifiesto.
+    #>
+    if (-not (Invoke-EnsureSession)) { Wait-LabKey; return }
+
+    $cap = Get-LabCapacidad -Nombre 'Vulnerabilidades'
+    if (-not $cap) {
+        Write-LabError "La capacidad 'Vulnerabilidades' no está registrada. ¿Carpeta free/ desactivada?"
+        Wait-LabKey
+        return
+    }
+
+    # Contexto mínimo para TestDisponible
+    $ctxTest = @{
+        TenantId      = (Get-MgContext -ErrorAction SilentlyContinue).TenantId
+        TenantDomain  = (Get-MgContext -ErrorAction SilentlyContinue).TenantId
+        Nivel         = Get-LabNivelActual -Config $config
+        NivelEfectivo = Get-LabNivelEfectivo -Config $config
+        Config        = $config
+    }
+
+    $t = & $cap.TestDisponible $ctxTest
+    if (-not $t.Disponible) {
+        Write-LabWarn $t.Motivo
+        Wait-LabKey
+        return
+    }
+
+    # PreguntarUI
+    $ctxUI = $ctxTest.Clone()
+    $def = & $cap.PreguntarUI $ctxUI
+    if ($null -eq $def) {
+        Write-LabInfo 'Operación cancelada.'
+        Wait-LabKey
+        return
+    }
+
+    # ValidarDef
+    $errores = & $cap.ValidarDef @($def)
+    if (@($errores).Count -gt 0) {
+        Write-LabError 'La vulnerabilidad tiene errores de validación:'
+        foreach ($e in @($errores)) { Write-Host "  - $e" -ForegroundColor Red }
+        Wait-LabKey
+        return
+    }
+
+    # Resumen y confirmación
+    Show-LabHeader -Titulo 'RESUMEN DE VULNERABILIDAD'
+    Write-Host "  Nombre : $($def.nombre)"
+    Write-Host "  Tipo   : $($def.tipo)"
+    Write-Host ''
+    $texto = & $cap.Describir @($def)
+    Write-Host "  $texto" -ForegroundColor Gray
+    Write-Host ''
+    Write-Host '¿Aplicar esta vulnerabilidad?' -ForegroundColor Yellow
+    $resp = Read-Host "Escribe 'SI' para confirmar"
+    if ($resp -ne 'SI') {
+        Write-LabInfo 'Operación cancelada.'
+        Wait-LabKey
+        return
+    }
+
+    # Construir snapshot pre-lab (solo ahora, tras confirmar)
+    Write-LabInfo 'Construyendo snapshot pre-lab...'
+    $snapshot = New-LabSnapshotPreLab
+
+    # Contexto para Crear
+    $manifiesto = if (Test-LabManifiestoExists) { Get-LabManifiesto } else { $null }
+    if ($null -eq $manifiesto) {
+        $manifiesto = New-LabManifiestoVacio -Escenario 'manual' -Nivel (Get-LabNivelActual -Config $config) -Semilla $null
+        $manifiesto.tenantDomain = (Get-MgContext).TenantId
+    }
+
+    $ctxCrear = @{
+        TenantId                = (Get-MgContext -ErrorAction SilentlyContinue).TenantId
+        TenantDomain            = $manifiesto.tenantDomain
+        Nivel                   = Get-LabNivelActual -Config $config
+        NivelEfectivo           = Get-LabNivelEfectivo -Config $config
+        Config                  = $config
+        SnapshotPreLab          = $snapshot
+        VulnerabilidadesExcluidas = @()
+    }
+
+    Write-LabInfo "Aplicando vulnerabilidad '$($def.nombre)'..."
+    $resultados = @()
+    try {
+        $resultados = & $cap.Crear @($def) $ctxCrear
+    } catch {
+        Write-LabError "Error aplicando la vulnerabilidad: $($_.Exception.Message)"
+        Wait-LabKey
+        return
+    }
+
+    if (@($resultados).Count -eq 0) {
+        Write-LabWarn 'No se aplicó ninguna vulnerabilidad (posiblemente excluida u omitida).'
+        Wait-LabKey
+        return
+    }
+
+    # Registrar en el manifiesto
+    foreach ($r in @($resultados)) {
+        if ($null -eq $r) { continue }
+        $capacidadAplicadora = if ($r.PSObject.Properties['capacidadAplicadora'] -and $r.capacidadAplicadora) {
+            $r.capacidadAplicadora
+        } else {
+            'Vulnerabilidades'
+        }
+        $datos = if ($r.PSObject.Properties['datos'] -and $null -ne $r.datos) { $r.datos } else { @{} }
+        $estado = if ($r.PSObject.Properties['estadoDetalle'] -and $r.estadoDetalle) {
+            # estadoDetalle puede ser 'creado', 'reutilizado', 'preexistente'
+            # Mapear a estado de vulnerabilidad
+            switch ($r.estadoDetalle) {
+                'preexistente' { 'preexistente' }
+                'reutilizado'  { 'aplicada' }
+                'creado'       { 'aplicada' }
+                default        { 'aplicada' }
+            }
+        } else {
+            'aplicada'
+        }
+
+        $null = Add-LabManifiestoVulnerabilidad `
+            -Manifiesto $manifiesto `
+            -Nombre $def.nombre `
+            -Tipo $r.tipo `
+            -Capacidad $capacidadAplicadora `
+            -Datos $datos `
+            -Estado $estado
+
+        Write-LabOk "Vulnerabilidad registrada: $($r.tipo) ($estado)"
+    }
+
+    # Guardar manifiesto
+    $manifiestoPath = Get-LabManifiestoPath
+    if (Save-LabManifiesto -Manifiesto $manifiesto -Path $manifiestoPath) {
+        Write-LabOk "Manifiesto guardado: $manifiestoPath"
+    } else {
+        Write-LabError 'No se pudo guardar el manifiesto.'
+    }
+
+    Wait-LabKey
+}
+
+function Invoke-VerVulnerabilidades {
+    <#
+    .SYNOPSIS
+        Lista las vulnerabilidades del manifiesto con su estado.
+    #>
+    Show-LabHeader -Titulo 'VULNERABILIDADES EN EL MANIFIESTO'
+
+    if (-not (Test-LabManifiestoExists)) {
+        Write-LabWarn 'No hay manifiesto. No hay vulnerabilidades registradas.'
+        Wait-LabKey
+        return
+    }
+
+    try {
+        $m = Get-LabManifiesto
+    } catch {
+        Write-LabError "No se pudo leer el manifiesto: $($_.Exception.Message)"
+        Wait-LabKey
+        return
+    }
+
+    if ($null -eq $m -or @($m.vulnerabilidades).Count -eq 0) {
+        Write-LabInfo 'No hay vulnerabilidades registradas en el manifiesto.'
+        Wait-LabKey
+        return
+    }
+
+    $i = 0
+    foreach ($v in @($m.vulnerabilidades)) {
+        $i++
+        $color = switch ($v.estado) {
+            'aplicada'     { 'Yellow' }
+            'revertida'    { 'Green' }
+            'preexistente' { 'DarkGray' }
+            'fallida'      { 'Red' }
+            'no-revertida' { 'Red' }
+            'omitida'      { 'DarkGray' }
+            default        { 'Gray' }
+        }
+
+        Write-Host ("  [{0}] {1}" -f $i, $v.nombre) -ForegroundColor Cyan
+        Write-Host ("      Tipo       : {0}" -f $v.tipo)
+        Write-Host ("      Capacidad  : {0}" -f $v.capacidad)
+        Write-Host ("      Estado     : {0}" -f $v.estado) -ForegroundColor $color
+        Write-Host ("      Timestamp  : {0}" -f $v.timestamp)
+        Write-Host ''
+    }
+
+    $pendientes = Get-LabManifiestoPendientes -Manifiesto $m
+    Write-Host ("Total: {0} | Pendientes de revertir: {1}" -f @($m.vulnerabilidades).Count, @($pendientes.vulnerabilidades).Count) -ForegroundColor Gray
+    Write-Host ''
+    Write-Host 'Para revertirlas, usa [3] Limpiar entorno.' -ForegroundColor Gray
+    Wait-LabKey
+}
+
 function Invoke-Limpiar {
     <#
     .SYNOPSIS
@@ -538,7 +761,7 @@ function Invoke-VerManifiesto {
         Write-Host ''
         Write-Host "Vulnerabilidades pendientes: $($pendientes.vulnerabilidades.Count)" -ForegroundColor Cyan
         foreach ($v in $pendientes.vulnerabilidades) {
-            Write-Host "  - [$($v.capacidad)] $($v.tipo): $($v.id)" -ForegroundColor Gray
+            Write-Host "  - [$($v.capacidad)] $($v.tipo): $($v.nombre) ($($v.estado))" -ForegroundColor Gray
         }
     } catch {
         Write-LabError "No se pudo leer el manifiesto: $($_.Exception.Message)"
@@ -605,11 +828,15 @@ function Show-EstadoSesion {
 function Show-EstadoNivel {
     <#
     .SYNOPSIS
-        Pinta el nivel de licencia actual.
+        Pinta el nivel de licencia actual (configurado y efectivo).
     #>
     Write-Host '--- Nivel de licencia ---' -ForegroundColor Yellow
     $nivel = Get-LabNivelActual -Config $config
-    Write-Host "  Nivel     : $nivel ($(Get-LabNivelDescripcion -Nivel $nivel))"
+    $efectivo = if (Test-LabGraphSession) { Get-LabNivelEfectivo -Config $config } else { $nivel }
+    Write-Host "  Configurado: $nivel ($(Get-LabNivelDescripcion -Nivel $nivel))"
+    if ($efectivo -ne $nivel) {
+        Write-Host "  Efectivo   : $efectivo (limitado por el tenant)" -ForegroundColor Gray
+    }
     Write-Host ''
 }
 
@@ -668,12 +895,16 @@ while ($true) {
     Show-EstadoNivel
     Show-EstadoManifiesto
 
-    Write-Host '--- Creacion ---' -ForegroundColor Cyan
+    Write-Host '--- Creacion (escenarios) ---' -ForegroundColor Cyan
     Write-Host '  [1] Creacion automatica (nivel -> tipo -> crear)'
     Write-Host '  [2] Creacion manual (menu generado desde capacidades)'
     Write-Host ''
+    Write-Host '--- Vulnerabilidades ---' -ForegroundColor Cyan
+    Write-Host '  [5] Crear vulnerabilidad (aplicar sobre objetos existentes)'
+    Write-Host '  [6] Ver vulnerabilidades del manifiesto'
+    Write-Host ''
     Write-Host '--- Limpieza ---' -ForegroundColor Cyan
-    Write-Host '  [3] Limpiar entorno (despacho por capacidad)'
+    Write-Host '  [3] Limpiar entorno (vulnerabilidades primero, luego objetos)'
     Write-Host ''
     Write-Host '--- Manifiesto ---' -ForegroundColor Cyan
     Write-Host '  [4] Ver manifiesto'
@@ -695,6 +926,8 @@ while ($true) {
         '2' { Invoke-CrearPersonalizada }
         '3' { Invoke-Limpiar }
         '4' { Invoke-VerManifiesto }
+        '5' { Invoke-CrearVulnerabilidad }
+        '6' { Invoke-VerVulnerabilidades }
         'C' { Invoke-GestionSesion }
         'N' { Invoke-CambiarNivel }
         'K' { Invoke-VerCapacidades }

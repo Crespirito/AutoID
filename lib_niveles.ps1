@@ -8,6 +8,8 @@
       - Nivel actual (persistido en menu_config.json).
       - Listado de niveles disponibles según las carpetas activas.
       - Filtro de capacidades por nivel.
+      - Nivel real del tenant (consulta de SKUs).
+      - Nivel efectivo (min configurado, real del tenant).
 
     El nivel determina qué carpetas de lib_caps/ se cargan:
       free/  -> capacidades disponibles en Entra ID Free
@@ -20,8 +22,20 @@
 
     Un nivel está disponible si su carpeta existe Y contiene al menos un
     cap_*.ps1. Una carpeta vacía no cuenta como nivel disponible.
+
+    NIVEL EFECTIVO:
+    Es el mínimo entre el nivel configurado (menu_config.json) y el nivel
+    real del tenant (SKUs contratados). Se usa para decidir qué tipos de
+    vulnerabilidad se pueden crear: si el operador se limita a Free en un
+    tenant P2, el efectivo es Free; si configura P2 en un tenant P1, el
+    efectivo es P1. Respeta la decisión del operador y no ofrece lo que el
+    tenant no soporta.
+
+    El resto de capacidades (AccesoCondicional, GruposDinamicos, etc.) siguen
+    consultando SKUs en su propio TestDisponible. El nivel efectivo se usa
+    solo en el subsistema de vulnerabilidades.
 .NOTES
-    Depende de lib_ui.ps1 (Write-Lab*).
+    Depende de lib_ui.ps1 (Write-Lab*) y de lib_graph.ps1 (Test-LabGraphSession).
     Se carga por dot-sourcing desde menu.ps1.
 #>
 
@@ -274,4 +288,94 @@ function Set-LabNivel {
     $Config['NivelLicencia'] = $Nivel
     $null = Save-LabConfig -Config $Config
     return $Config
+}
+
+# ============================================================
+# FUNCIONES PÚBLICAS: NIVEL REAL DEL TENANT Y NIVEL EFECTIVO
+# ============================================================
+
+function Get-LabNivelRealDelTenant {
+    <#
+    .SYNOPSIS
+        Devuelve el nivel de licencia real del tenant según sus SKUs.
+    .DESCRIPTION
+        Consulta Get-MgSubscribedSku y busca planes de servicio con
+        ProvisioningStatus = 'Success':
+          - AAD_PREMIUM_P2  -> P2
+          - AAD_PREMIUM     -> P1
+          - ninguno         -> Free
+
+        Si no hay sesión de Graph o la consulta falla, devuelve 'Free'.
+        Es conservador a propósito: si no se puede verificar que el
+        tenant soporta P1/P2, no se ofrece.
+    .OUTPUTS
+        String: 'Free', 'P1' o 'P2'.
+    #>
+    try {
+        if (-not (Test-LabGraphSession)) {
+            return 'Free'
+        }
+
+        $skus = Get-MgSubscribedSku -ErrorAction Stop
+        $tieneP1 = $false
+        $tieneP2 = $false
+
+        foreach ($sku in @($skus)) {
+            foreach ($plan in @($sku.ServicePlans)) {
+                if ($plan.ProvisioningStatus -ne 'Success') { continue }
+                if ($plan.ServicePlanName -eq 'AAD_PREMIUM')    { $tieneP1 = $true }
+                if ($plan.ServicePlanName -eq 'AAD_PREMIUM_P2') { $tieneP2 = $true }
+            }
+        }
+
+        if ($tieneP2) { return 'P2' }
+        if ($tieneP1) { return 'P1' }
+        return 'Free'
+    } catch {
+        Write-LabWarn "No se pudo consultar el nivel real del tenant: $($_.Exception.Message). Se asume 'Free'."
+        return 'Free'
+    }
+}
+
+function Get-LabNivelEfectivo {
+    <#
+    .SYNOPSIS
+        Devuelve el nivel efectivo: mínimo entre configurado y real del tenant.
+    .DESCRIPTION
+        El nivel efectivo es el mínimo (por orden Free < P1 < P2) entre:
+          - Nivel configurado en menu_config.json (Get-LabNivelActual).
+          - Nivel real del tenant según SKUs (Get-LabNivelRealDelTenant).
+
+        Así:
+          - Si el operador se limita a Free en un tenant P2, efectivo = Free.
+          - Si configura P2 en un tenant P1, efectivo = P1.
+          - Si coinciden, efectivo = ese nivel.
+
+        Respeta la decisión del operador y no ofrece lo que el tenant no
+        soporta. Si falla la consulta de SKUs, el real es Free, así que el
+        efectivo cae a Free (conservador).
+    .PARAMETER Config
+        Hashtable de configuración (resultado de Get-LabConfig).
+    .PARAMETER RootCaps
+        Ruta raíz de capacidades. Útil para tests.
+    .OUTPUTS
+        String: 'Free', 'P1' o 'P2'.
+    #>
+    param(
+        [Parameter(Mandatory = $true)]
+        [hashtable]$Config,
+
+        [string]$RootCaps = $null
+    )
+
+    $configurado = Get-LabNivelActual -Config $Config -RootCaps $RootCaps
+    $real = Get-LabNivelRealDelTenant
+
+    $ordenConfig = Get-LabNivelOrden -Nivel $configurado
+    $ordenReal   = Get-LabNivelOrden -Nivel $real
+
+    if ($ordenConfig -le $ordenReal) {
+        return $configurado
+    }
+    return $real
 }

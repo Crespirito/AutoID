@@ -1,68 +1,59 @@
-# ============================================================
-# SECRETOS Y SEMILLAS LOCALES (NUNCA SUBIR A GIT)
-# ============================================================
-# Semillas locales por escenario. De ellas se derivan las contraseñas
-# de los usuarios. Si se filtran, se pueden reproducir las contraseñas.
+# ==============================================================================
+# GESTOR DE ENTORNOS DE LABORATORIO - ENTRA ID
+# ==============================================================================
+
+# ------------------------------------------------------------------------------
+# 1. SECRETOS Y SEMILLAS (CRÍTICO)
+# ------------------------------------------------------------------------------
+# Las semillas derivan las contraseñas. Si se filtran, se pueden regenerar
+# todas las contraseñas del escenario.
 escenarios/.secrets/
 *.seed
 
-# ============================================================
-# MANIFIESTOS Y LOGS DE EJECUCIÓN
-# ============================================================
-# El manifiesto contiene UPNs y nombres de objetos del tenant.
-# No debe versionarse: es estado de ejecución, no código.
+# ------------------------------------------------------------------------------
+# 2. MANIFIESTOS Y ESTADO (SENSIBLE)
+# ------------------------------------------------------------------------------
+# Contienen UPNs, objectIds y nombres de objetos de tu tenant real.
 manifiesto_lab*.json
 *_procesado_*.json
 
-# Logs de creación y limpieza
+# ------------------------------------------------------------------------------
+# 3. CONFIGURACIÓN LOCAL (SENSIBLE)
+# ------------------------------------------------------------------------------
+# Contiene ClientId, TenantId y el Thumbprint del certificado App-Only.
+menu_config.json
+
+# ------------------------------------------------------------------------------
+# 4. LOGS Y ARTEFACTOS DE EJECUCIÓN
+# ------------------------------------------------------------------------------
+# Los logs contienen datos de la ejecución (nombres, UPNs, errores).
 log_*.csv
 log_creauto_*.csv
 log_cleanup_*.csv
 log_personalizada_*.csv
+*.log
 
-# ============================================================
-# CONFIGURACIÓN LOCAL DEL MENÚ
-# ============================================================
-# menu_config.json es estado local del operador (Verbose, App-Only).
-# No debe versionarse.
-menu_config.json
-
-# ============================================================
-# BIBLIOTECA GENERADA
-# ============================================================
-# biblioteca.json se regenera con generar_biblioteca.ps1.
-# No contiene secretos, pero es artefacto de generación.
+# Artefactos generados por generar_biblioteca.ps1
 biblioteca.json
 
-# ============================================================
-# ESCENARIOS GENERADOS (OPCIONAL)
-# ============================================================
-# Si quieres versionar los escenarios de ejemplo (sin secretos),
-# deja las dos líneas siguientes comentadas. Si prefieres que cada
-# operador los genere en local con generar_biblioteca.ps1,
-# descoméntalas.
-# escenarios/escenario/
-# escenarios/vulnerab/
-# escenarios/plantillas/
+# ------------------------------------------------------------------------------
+# 5. ESCENARIOS GENERADOS (OPCIONAL)
+# ------------------------------------------------------------------------------
+# Descomenta estas líneas si NO quieres subir los escenarios de ejemplo
+# generados automáticamente, para evitar mezclarlos con tus escenarios reales.
+# escenarios/escenario/escenarioej*.json
+# escenarios/vulnerab/escenarioej*.json
+# escenarios/plantillas/*.json
 
-# ============================================================
-# OTROS ARTEFACTOS DE EJECUCIÓN
-# ============================================================
-*.log
+# ------------------------------------------------------------------------------
+# 6. BASURA DEL SISTEMA Y ENTORNOS DE DESARROLLO
+# ------------------------------------------------------------------------------
 *.tmp
 *.bak
-
-# ============================================================
-# ENTORNOS DE DESARROLLO
-# ============================================================
 .vscode/
 .vs/
 *.user
 *.suo
-
-# ============================================================
-# SISTEMA OPERATIVO
-# ============================================================
 Thumbs.db
 Desktop.ini
 .DS_Store

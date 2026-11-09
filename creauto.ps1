@@ -2,11 +2,15 @@
 .SYNOPSIS
     Creación automática de entorno de laboratorio en Entra ID.
 .DESCRIPTION
-    Flujo de creación automática:
+    Flujo de creación automática de ESCENARIOS (no de vulnerabilidades):
       1. Elegir nivel de licencia (Free / P1 / P2).
       2. Elegir tipo de escenario (plantilla) o escenario concreto.
       3. Revisar resumen generado por las capacidades.
       4. Crear, con opción de parar y guardar plantilla en cualquier momento.
+
+    Las VULNERABILIDADES no se aplican desde aquí: son una entidad
+    separada que se aplica sobre objetos existentes. Se crean desde
+    menu.ps1 [5] Crear vulnerabilidad.
 
     Las contraseñas de los usuarios se derivan de la semilla local del
     escenario (escenarios/.secrets/<escenario>.seed) y se muestran UNA
@@ -24,8 +28,12 @@
 .PARAMETER Plantilla
     Nombre de la plantilla a usar como tipo de escenario. Si se omite,
     se muestra un menú de plantillas.
-.PARAMETER SinVulnerabilidad
-    Si se especifica, omite la sección 'vulnerabilidades' del escenario.
+.PARAMETER ExcluirVulnerabilidad
+    Nombres de vulnerabilidades a excluir. En el flujo actual de
+    creauto.ps1 no hay vulnerabilidades que aplicar (no son parte del
+    escenario), así que este parámetro es un no-op documentado. Se pasa
+    al contexto para que, si en el futuro se añade un flujo combinado
+    escenario + vulnerabilidades, ya esté cableado.
 .PARAMETER DryRun
     Si se especifica, no crea nada. Solo muestra el resumen y sale.
     No requiere sesión de Graph ni semilla.
@@ -45,7 +53,7 @@ param(
     [string]$Plantilla = $null,
 
     [Parameter(Mandatory = $false)]
-    [switch]$SinVulnerabilidad,
+    [string[]]$ExcluirVulnerabilidad = @(),
 
     [Parameter(Mandatory = $false)]
     [switch]$DryRun
@@ -297,12 +305,7 @@ if ($Plantilla) {
     exit 1
 }
 
-# 4. Si se omite vulnerabilidad, vaciar la sección
-if ($SinVulnerabilidad -and $esc.Secciones.ContainsKey('Vulnerabilidades')) {
-    $esc.Secciones['Vulnerabilidades'] = @()
-}
-
-# 5. Resumen
+# 4. Resumen
 Show-LabHeader -Titulo ('RESUMEN DEL ESCENARIO: ' + ($esc.Nombre))
 
 if ($DryRun) {
@@ -332,7 +335,7 @@ if ($esc.Desconocidas.Count -gt 0) {
 }
 Write-Host ''
 
-# 6. Validación
+# 5. Validación
 $errores = Invoke-LabValidacionEscenario -EscenarioNormalizado $esc -Contexto @{ Nivel = $nivelElegido }
 if ($errores.Count -gt 0) {
     Write-LabError 'El escenario tiene errores de validación:'
@@ -340,7 +343,7 @@ if ($errores.Count -gt 0) {
     exit 1
 }
 
-# 7. Confirmación (o salida en DryRun)
+# 6. Confirmación (o salida en DryRun)
 if ($DryRun) {
     Write-Host 'Simulacion completada. No se ha modificado Entra ID.' -ForegroundColor Yellow
     exit 0
@@ -353,7 +356,7 @@ if ($resp -ne 'SI') {
     exit 0
 }
 
-# 8. Derivar contraseñas
+# 7. Derivar contraseñas
 $nombreSemilla = if ($esc.Nombre) { $esc.Nombre } else { 'manual_' + (Get-Date -Format 'yyyyMMdd_HHmmss') }
 $semilla = Get-LabSeed -NombreEscenario $nombreSemilla
 
@@ -369,11 +372,11 @@ foreach ($nombreCap in $esc.Secciones.Keys) {
     }
 }
 
-# 9. Manifiesto
+# 8. Manifiesto
 $manifiesto = New-LabManifiestoVacio -Escenario $esc.Nombre -Nivel $nivelElegido -Semilla $nombreSemilla
 $manifiesto.TenantDomain = (Get-MgContext).TenantId
 
-# 10. Crear con opción de parar
+# 9. Crear con opción de parar
 $detenerScript = {
     param($nombreCap, $ctx)
     Write-Host ''
@@ -392,7 +395,7 @@ $detenerScript = {
 
 $resultado = Invoke-LabCreacion -EscenarioNormalizado $esc -Manifiesto $manifiesto -Config $config -Detener $detenerScript
 
-# 11. Si se detuvo, guardar plantilla
+# 10. Si se detuvo, guardar plantilla
 if ($resultado.Resultado -eq 'detenido') {
     Write-LabInfo 'Guardando plantilla del escenario parcial...'
     $nombrePlantilla = Read-Host 'Nombre de la plantilla (Enter para cancelar)'
@@ -421,7 +424,7 @@ if ($resultado.Resultado -eq 'detenido') {
     }
 }
 
-# 12. Mostrar contraseñas derivadas (una sola vez)
+# 11. Mostrar contraseñas derivadas (una sola vez)
 if ($passwords.Count -gt 0) {
     Write-Host ''
     Write-Host '=== CONTRASEÑAS DERIVADAS (MOSTRAR UNA SOLA VEZ) ===' -ForegroundColor Yellow
@@ -434,7 +437,7 @@ if ($passwords.Count -gt 0) {
     Write-Host ''
 }
 
-# 13. Guardar manifiesto y log
+# 12. Guardar manifiesto y log
 $manifiestoPath = Get-LabManifiestoPath
 if (Save-LabManifiesto -Manifiesto $manifiesto -Path $manifiestoPath) {
     Write-LabOk "Manifiesto guardado: $manifiestoPath"
@@ -451,4 +454,5 @@ try {
 } catch { }
 
 Write-Host ''
-Write-LabOk "Creación automática finalizada."
+Write-LabOk 'Creación automática finalizada.'
+Write-LabInfo 'Las vulnerabilidades se aplican desde menu.ps1 [5] Crear vulnerabilidad.'

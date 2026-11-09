@@ -4,15 +4,26 @@
 .DESCRIPTION
     Genera directamente en las rutas que el programa lee:
       - escenarios/escenario/*.json    -> escenarios de ejemplo
-      - escenarios/vulnerab/*.json     -> vulnerabilidades de ejemplo
+      - escenarios/vulnerab/*.json     -> catalogo de vulnerabilidades por nombre
       - escenarios/plantillas/*.json   -> plantillas para el flujo nivel -> tipo
       - escenarios/.secrets/*.seed     -> semillas locales (no sobrescribe)
       - biblioteca.json                -> biblioteca de datos para inspeccion
 
+    IMPORTANTE SOBRE VULNERABILIDADES:
+    Los escenarios generados NO contienen seccion 'vulnerabilidades' ni
+    'vulnerabilidad'. Las vulnerabilidades no son parte del escenario: son
+    modificaciones maliciosas que se aplican sobre objetos existentes y se
+    crean desde menu.ps1 [5] Crear vulnerabilidad.
+
+    El catalogo escenarios/vulnerab/*.json se mantiene como referencia: cada
+    archivo declara una vulnerabilidad por nombre (tipo + parametros). Si en
+    el futuro se quiere cargar una vulnerabilidad por nombre desde [5], ahi
+    esta la fuente.
+
     FILTRADO POR NIVEL:
-    El parametro -Nivel controla que secciones se generan:
+    El parametro -Nivel controla que secciones se generan en los escenarios:
       - Free: usuarios, grupos, aplicaciones, appRoles, credencialesApp,
-              permisosApi, invitados, relaciones, vulnerabilidades.
+              permisosApi, invitados, relaciones.
       - P1:   anade administrativeUnits, gruposDinamicos,
               gruposRoleAssignable, licencias, accesoCondicional, metodosAuth.
       - P2:   anade pim.
@@ -261,6 +272,9 @@ function New-EscenarioBase {
     .SYNOPSIS
         Construye un escenario de ejemplo con secciones Free y, si el
         nivel lo permite, secciones P1 y P2.
+
+        IMPORTANTE: los escenarios NO incluyen vulnerabilidades. No son
+        parte del escenario. Se aplican desde menu.ps1 [5].
     #>
     param(
         [Parameter(Mandatory = $true)] [string]$Nombre,
@@ -299,7 +313,6 @@ function New-EscenarioBase {
         grupos         = $gr
         aplicaciones   = $ap
         relaciones     = $rels
-        vulnerabilidad = "$($Nombre)_sp_owner"
     }
 
     if ($ap.Count -gt 0 -and $us.Count -gt 0) {
@@ -431,9 +444,19 @@ function New-EscenarioBase {
 }
 
 # ============================================================
-# CONSTRUCCIÓN DE VULNERABILIDADES
+# CONSTRUCCIÓN DEL CATÁLOGO DE VULNERABILIDADES
 # ============================================================
 function New-VulnerabilidadSpOwner {
+    <#
+    .SYNOPSIS
+        Construye la definicion de una vulnerabilidad ServicePrincipalOwner
+        para el catalogo escenarios/vulnerab/*.json.
+
+        IMPORTANTE: estas definiciones NO se incluyen en los escenarios.
+        Son un catalogo de referencia: cada archivo declara una vulnerabilidad
+        por nombre (tipo + parametros). Si en el futuro se quiere cargar una
+        vulnerabilidad por nombre desde menu.ps1 [5], aqui esta la fuente.
+    #>
     param(
         [Parameter(Mandatory = $true)] [string]$Nombre,
         [Parameter(Mandatory = $true)] [string]$Usuario,
@@ -491,6 +514,7 @@ $esc2 = New-EscenarioBase -Nombre 'escenarioej2' -Descripcion 'Escenario de ejem
 $esc3 = New-EscenarioBase -Nombre 'escenarioej3' -Descripcion 'Escenario de ejemplo 3: 10 usuarios, 10 grupos, 10 aplicaciones.' `
     -NumUsuarios 10 -NumGrupos 10 -NumApps 10 -OffsetUsuarios 0 -OffsetGrupos 0 -OffsetApps 0 -NivelActual $Nivel
 
+# Catalogo de vulnerabilidades (no forma parte de los escenarios)
 $vuln1 = New-VulnerabilidadSpOwner -Nombre 'escenarioej1_sp_owner' `
     -Usuario $esc1.usuarios[0].upn -Aplicacion $esc1.aplicaciones[0].displayName `
     -Descripcion 'Owner de SP para el escenario 1.'
@@ -508,7 +532,7 @@ $plantillaApps = New-Plantilla -Nombre 'aplicaciones' -Descripcion 'Aplicaciones
 $plantillaInvitados = New-Plantilla -Nombre 'invitados' -Descripcion 'Usuarios invitados (B2B).' `
     -Secciones @('invitados')
 $plantillaMixto = New-Plantilla -Nombre 'mixto' -Descripcion 'Todas las secciones disponibles para el nivel actual.' `
-    -Secciones @('usuarios','grupos','aplicaciones','relaciones','appRoles','credencialesApp','permisosApi','invitados','vulnerabilidades')
+    -Secciones @('usuarios','grupos','aplicaciones','relaciones','appRoles','credencialesApp','permisosApi','invitados')
 
 $plantillas = [ordered]@{
     'basico'       = $plantillaBasico
@@ -577,5 +601,6 @@ Write-Host "[OK] Plantillas   : $($plantillas.Keys -join ', ')"
 Write-Host ''
 Write-Host "Usuarios: $($usuarios.Count) | Grupos: $($grupos.Count) | Apps: $($aplicaciones.Count) | Roles: $($roles.Count)"
 Write-Host ''
+Write-InfoLocal 'Los escenarios NO incluyen vulnerabilidades. Se aplican desde menu.ps1 [5] Crear vulnerabilidad.'
 Write-InfoLocal 'Los JSON NO contienen contrasenas. Se derivan en creauto.ps1 / creamanual.ps1 desde la semilla local.'
 Write-WarnLocal 'Anade escenarios/.secrets/ a .gitignore para no subir las semillas a GitHub.'

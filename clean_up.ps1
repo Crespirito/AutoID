@@ -3,12 +3,15 @@
     Limpieza de entornos de laboratorio en Entra ID.
 .DESCRIPTION
     Lee el manifiesto generado por los scripts de creación y revierte
-    todos los objetos creados.
+    todos los objetos creados y las vulnerabilidades aplicadas.
 
     Orden de borrado (gestionado por Invoke-LabReversion):
       1. Vulnerabilidades aplicadas (owners, credenciales, roles PIM).
+         - Verifica objectId del objeto afectado.
+         - Llama a PreRevertir de la capacidad si existe.
       2. Objetos en orden inverso de creación (LIFO).
-      3. Cada objeto se revierte llamando a la capacidad que lo creó.
+      3. Cada objeto/vulnerabilidad se revierte llamando a la capacidad
+         que lo creó/aplicó.
 
     SEGURIDAD:
     - Antes de borrar cada objeto, se verifica que el objectId del
@@ -17,7 +20,8 @@
     - Los objetos con estado 'preexistente' se ignoran. Eran anteriores
       al laboratorio y no se tocan.
     - Si una capacidad no está registrada (carpeta desactivada), el
-      objeto se deja en el manifiesto con estado 'no-revertido' y se avisa.
+      objeto/vulnerabilidad se deja en el manifiesto con estado
+      'no-revertido'/'no-revertida' y se avisa.
 
     SOFT-DELETE:
     Remove-MgUser, Remove-MgGroup, Remove-MgApplication y
@@ -123,31 +127,50 @@ Write-Host "  Tenant            : $($manifiesto.tenantDomain)"
 Write-Host "  Nivel             : $($manifiesto.nivel)"
 Write-Host "  Escenario         : $($manifiesto.escenario)"
 Write-Host "  Objetos totales   : $($manifiesto.objetos.Count)"
-Write-Host "  Objetos pendientes: $($pendientes.objetos.Count)" -ForegroundColor Yellow
+Write-Host "  Vulnerabilidades  : $($manifiesto.vulnerabilidades.Count)"
+Write-Host ''
+Write-Host "  Objetos pendientes        : $($pendientes.objetos.Count)" -ForegroundColor Yellow
 Write-Host "  Vulnerabilidades pendientes: $($pendientes.vulnerabilidades.Count)" -ForegroundColor Yellow
 Write-Host ''
 
-$porCapacidad = @{}
+# Desglose por capacidad (objetos)
+$objetosPorCapacidad = @{}
 foreach ($o in $pendientes.objetos) {
     $cap = if ($o.capacidad) { $o.capacidad } else { 'Desconocida' }
-    if (-not $porCapacidad.ContainsKey($cap)) { $porCapacidad[$cap] = 0 }
-    $porCapacidad[$cap]++
+    if (-not $objetosPorCapacidad.ContainsKey($cap)) { $objetosPorCapacidad[$cap] = 0 }
+    $objetosPorCapacidad[$cap]++
 }
-if ($porCapacidad.Count -gt 0) {
+if ($objetosPorCapacidad.Count -gt 0) {
     Write-Host '  Objetos pendientes por capacidad:' -ForegroundColor Cyan
-    foreach ($cap in $porCapacidad.Keys) {
-        Write-Host "    $cap : $($porCapacidad[$cap])"
+    foreach ($cap in ($objetosPorCapacidad.Keys | Sort-Object)) {
+        Write-Host "    $cap : $($objetosPorCapacidad[$cap])"
+    }
+    Write-Host ''
+}
+
+# Desglose por capacidad (vulnerabilidades)
+$vulnsPorCapacidad = @{}
+foreach ($v in $pendientes.vulnerabilidades) {
+    $cap = if ($v.capacidad) { $v.capacidad } else { 'Desconocida' }
+    if (-not $vulnsPorCapacidad.ContainsKey($cap)) { $vulnsPorCapacidad[$cap] = 0 }
+    $vulnsPorCapacidad[$cap]++
+}
+if ($vulnsPorCapacidad.Count -gt 0) {
+    Write-Host '  Vulnerabilidades pendientes por capacidad:' -ForegroundColor Cyan
+    foreach ($cap in ($vulnsPorCapacidad.Keys | Sort-Object)) {
+        Write-Host "    $cap : $($vulnsPorCapacidad[$cap])"
     }
     Write-Host ''
 }
 
 if ($pendientes.objetos.Count -eq 0 -and $pendientes.vulnerabilidades.Count -eq 0) {
-    Write-LabOk 'No hay objetos pendientes de revertir en el manifiesto.'
+    Write-LabOk 'No hay objetos ni vulnerabilidades pendientes de revertir en el manifiesto.'
     exit 0
 }
 
 if (-not $Forzar) {
-    Write-Host '¿Estás seguro de que quieres REVERTIR todos estos objetos?' -ForegroundColor Yellow
+    Write-Host '¿Estás seguro de que quieres REVERTIR todos estos elementos?' -ForegroundColor Yellow
+    Write-Host 'Orden: primero vulnerabilidades, luego objetos (LIFO).' -ForegroundColor Gray
     Write-Host 'Los objetos preexistentes y los ya revertidos se ignoran.' -ForegroundColor Gray
     $confirmacion = Read-Host "Escribe 'SI' para confirmar"
     if ($confirmacion -ne 'SI') {
@@ -159,7 +182,7 @@ if (-not $Forzar) {
 # ============================================================
 # REVERSIÓN
 # ============================================================
-Write-LabBanner 'Revirtiendo objetos del manifiesto'
+Write-LabBanner 'Revirtiendo vulnerabilidades y objetos del manifiesto'
 
 $resultado = Invoke-LabReversion -Manifiesto $manifiesto -Config $config -Forzar:$Forzar
 
@@ -200,26 +223,35 @@ if ($quedanPendientes.objetos.Count -eq 0 -and $quedanPendientes.vulnerabilidade
 # ============================================================
 # VOLCADO DEL LOG
 # ============================================================
-$logPath = Join-Path $PSScriptRoot "log_cleanup_$(Get-Date -Format 'yyyyMMdd_HHmmss').csv"
+$logPath = Join-Path $PSScriptRoot "log_cleanup_$(Get-Date -Format 'yyyyMMdd-HHmmss').csv"
 
 try {
     $resumen = @()
+
+    # Objetos
     foreach ($o in $manifiesto.objetos) {
         $resumen += [pscustomobject]@{
+            clase     = 'Objeto'
             id        = $o.id
+            nombre    = ''
             tipo      = $o.tipo
             capacidad = $o.capacidad
             estado    = $o.estado
         }
     }
+
+    # Vulnerabilidades
     foreach ($v in $manifiesto.vulnerabilidades) {
         $resumen += [pscustomobject]@{
+            clase     = 'Vulnerabilidad'
             id        = $v.id
-            tipo      = "Vulnerabilidad: $($v.tipo)"
+            nombre    = if ($v.nombre) { $v.nombre } else { '' }
+            tipo      = $v.tipo
             capacidad = $v.capacidad
             estado    = $v.estado
         }
     }
+
     if ($resumen.Count -gt 0) {
         $resumen | Export-Csv -Path $logPath -NoTypeInformation -Encoding UTF8
         Write-Host "Log completo: $logPath" -ForegroundColor Gray
