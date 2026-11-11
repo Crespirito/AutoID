@@ -1,8 +1,8 @@
 ===============================================================================
-                                MANIFIESTO
+#                              MANIFIESTO
 ===============================================================================
 
-El MANIFIESTO es un fichero JSON que registra todo lo que el laboratorio ha
+El **MANIFIESTO** es un fichero JSON que registra todo lo que el laboratorio ha
 creado o modificado en Entra ID, para poder revertirlo después de forma
 controlada. Es el contrato entre la creación y la limpieza: lo que no está en
 el manifiesto, no se borra.
@@ -13,7 +13,7 @@ funciona la limpieza con verificación de objectId.
 
 
 -------------------------------------------------------------------------------
-1. ESTRUCTURA DEL MANIFIESTO V2.1
+# 1. ESTRUCTURA DEL MANIFIESTO V2.1
 -------------------------------------------------------------------------------
 
 Un manifiesto v2.1 tiene metadatos y dos listas: objetos y vulnerabilidades.
@@ -30,7 +30,7 @@ Un manifiesto v2.1 tiene metadatos y dos listas: objetos y vulnerabilidades.
       "vulnerabilidades": [ ... ]
     }
 
-CAMPOS DE NIVEL SUPERIOR:
+**CAMPOS DE NIVEL SUPERIOR:**
 
     manifestVersion
         Versión del formato. Hoy es "2.1". Permite migraciones futuras.
@@ -65,7 +65,7 @@ CAMPOS DE NIVEL SUPERIOR:
 
 
 -------------------------------------------------------------------------------
-2. FORMA DE CADA OBJETO
+# 2. FORMA DE CADA OBJETO
 -------------------------------------------------------------------------------
 
 Cada entrada de objetos tiene campos comunes (que pone el núcleo) y campos
@@ -84,36 +84,36 @@ específicos (que decide la capacidad):
       }
     }
 
-CAMPOS COMUNES (los pone el núcleo, no la capacidad):
+### CAMPOS COMUNES (los pone el núcleo, no la capacidad):
 
-    id
+  **id**
         Identificador único dentro del manifiesto (obj-0001, obj-0002...).
         Sirve para referencias cruzadas y para logs.
 
-    tipo
+  **tipo**
         Tipo de objeto Graph (Usuario, Grupo, Aplicacion, ServicePrincipal,
         AppRole, AdministrativeUnit, AppRoleAssignment, CredencialApp,
         PermisoApi, Licencia, PimEligibleRole, etc.). Informativo.
 
-    capacidad
+  **capacidad**
         NOMBRE DE LA CAPACIDAD que lo creó. Es lo que el cleanup usa para
         despachar. Si la capacidad no está registrada, el cleanup no puede
         revertir el objeto.
 
-    estado
+  **estado**
         Estado del objeto. Ver sección 4.
 
-    timestamp
+  **timestamp**
         Fecha ISO 8601 de creación.
 
-    tenantId
+  **tenantId**
         Tenant donde se creó. Sirve para detectar drift.
 
-    datos
+  **datos**
         Datos específicos de la capacidad. El núcleo no los interpreta; solo
         los guarda y los pasa a Revertir.
 
-CAMPOS ESPECÍFICOS (van dentro de datos, los decide la capacidad):
+### CAMPOS ESPECÍFICOS (van dentro de datos, los decide la capacidad):
 
     Cada capacidad decide qué guardar en datos para poder revertir. Regla:
     datos debe contener todo lo que Revertir necesita, ni más ni menos.
@@ -130,12 +130,12 @@ CAMPOS ESPECÍFICOS (van dentro de datos, los decide la capacidad):
         AdministrativeUnit-> displayName, objectId
         PimEligibleRole  ->  userId, roleDefinitionId, scheduleRequestId
 
-    El manifiesto es AUTOCONTENIDO: datos debe bastar para revertir sin
+    El manifiesto es **AUTOCONTENIDO:** datos debe bastar para revertir sin
     consultar el escenario original.
 
 
 -------------------------------------------------------------------------------
-3. LA SECCIÓN VULNERABILIDADES
+# 3. LA SECCIÓN VULNERABILIDADES
 -------------------------------------------------------------------------------
 
 Se mantiene separada de objetos por una razón de orden: el cleanup revierte
@@ -162,19 +162,19 @@ Los campos comunes son los mismos que en objetos. La diferencia es que tipo es
 el tipo de vulnerabilidad, y datos son los objetos afectados que devolvió el
 aplicador.
 
-IMPORTANTE - CAMPO CAPACIDAD:
+## IMPORTANTE - CAMPO CAPACIDAD:
     El campo 'capacidad' es OBLIGATORIO y refleja la capacidad que aplicó la
     vulnerabilidad. Hoy puede ser 'Vulnerabilidades' o 'Pim' (si
     PimEligibleRole se delegó en cap_pim.ps1). El cleanup usará esta
     capacidad para despachar la reversión.
 
-IMPORTANTE - OBJECTID DEL OBJETO AFECTADO:
+## IMPORTANTE - OBJECTID DEL OBJETO AFECTADO:
     Todos los datos de vulnerabilidad incluyen 'objetoAfectadoObjectId'.
     Es el objectId del SP, grupo, app o usuario sobre el que se aplicó.
     Se usa en Test-LabVulnerabilidadCoincideConManifiesto antes de revertir,
     para evitar revertir sobre un objeto borrado y recreado externamente.
 
-Estados de vulnerabilidad:
+## Estados de vulnerabilidad:
 
     aplicada       ->  la vulnerabilidad se aplicó y se puede revertir.
     preexistente   ->  no se aplicó porque el objeto afectado era preexistente.
@@ -188,7 +188,7 @@ El detalle de tipos, catálogo y flujo está en docs/vulnerabilidades.md.
 
 
 -------------------------------------------------------------------------------
-4. ESTADOS DE CADA OBJETO
+# 4. ESTADOS DE CADA OBJETO
 -------------------------------------------------------------------------------
 
     ESTADO          SIGNIFICADO
@@ -205,25 +205,25 @@ El detalle de tipos, catálogo y flujo está en docs/vulnerabilidades.md.
                     distinto, etc.).
     omitido         Omitido por alguna razón (por ejemplo, preexistente).
 
-ESTADOS QUE EL CLEANUP INTENTA REVERTIR:
+### ESTADOS QUE EL CLEANUP INTENTA REVERTIR:
 
     Objetos:
         creado, reutilizado, fallido
     Vulnerabilidades:
         aplicada, fallida
 
-ESTADOS QUE EL CLEANUP IGNORA:
+### ESTADOS QUE EL CLEANUP IGNORA:
 
     Objetos:
         preexistente, revertido, no-revertido, omitido
     Vulnerabilidades:
         preexistente, revertida, no-revertida, omitida
 
-La distinción entre reutilizado y preexistente es clave:
+### La distinción entre reutilizado y preexistente es clave:
 
-    - reutilizado: el objeto lo creó una ejecución anterior del laboratorio.
+ - reutilizado: el objeto lo creó una ejecución anterior del laboratorio.
       Se puede revertir.
-    - preexistente: el objeto existía antes de que el laboratorio empezara.
+ - preexistente: el objeto existía antes de que el laboratorio empezara.
       No se toca.
 
 Las listas viven en lib_manifiesto.ps1:
@@ -237,22 +237,22 @@ es la única fuente de verdad.
 
 
 -------------------------------------------------------------------------------
-5. CÓMO SE RELLENA EL MANIFIESTO
+# 5. CÓMO SE RELLENA EL MANIFIESTO
 -------------------------------------------------------------------------------
 
-5.1. Objetos (escenario)
+## 5.1. Objetos (escenario)
 ------------------------
 El núcleo (lib_creadores.ps1) hace lo siguiente por cada objeto que devuelve
 Crear de una capacidad:
 
-    1. Añade id, capacidad, estado, timestamp, tenantId.
-    2. Mete los datos específicos en datos.
-    3. Lo añade a objetos.
+ 1. Añade id, capacidad, estado, timestamp, tenantId.
+ 2. Mete los datos específicos en datos.
+ 3. Lo añade a objetos.
 
-La capacidad NO rellena los campos comunes; solo devuelve un objeto con tipo,
+La capacidad **NO** rellena los campos comunes; solo devuelve un objeto con tipo,
 estadoDetalle y los datos específicos. El núcleo los envuelve:
 
-    LO QUE DEVUELVE Crear:
+Lo que **DEVUELVE** Crear:
 
         [pscustomobject]@{
             tipo          = 'AppRole'
@@ -261,7 +261,7 @@ estadoDetalle y los datos específicos. El núcleo los envuelve:
             value         = 'Admin'
         }
 
-    LO QUE EL NÚCLEO GUARDA EN EL MANIFIESTO:
+Lo que el núcleo **guarda** en el manifiesto:
 
         [pscustomobject]@{
             id        = 'obj-0042'
@@ -276,9 +276,9 @@ estadoDetalle y los datos específicos. El núcleo los envuelve:
             }
         }
 
-5.2. Vulnerabilidades
+## 5.2. Vulnerabilidades
 ---------------------
-Las vulnerabilidades NO se procesan en Invoke-LabCreacion (no están en el
+Las vulnerabilidades **NO** se procesan en Invoke-LabCreacion (no están en el
 escenario). Se registran desde menu.ps1 [5] con Add-LabManifiestoVulnerabilidad:
 
     $null = Add-LabManifiestoVulnerabilidad `
@@ -295,12 +295,12 @@ Add-LabManifiestoVulnerabilidad requiere -Capacidad. Ya no se hardcodea
 
 
 -------------------------------------------------------------------------------
-6. CÓMO SE USA EL MANIFIESTO EN EL CLEANUP
+# 6. CÓMO SE USA EL MANIFIESTO EN EL CLEANUP
 -------------------------------------------------------------------------------
 
 clean_up.ps1 no tiene un switch por tipo. Hace esto:
 
-    1. Revertir vulnerabilidades primero:
+  1. Revertir vulnerabilidades primero:
 
         foreach ($v in $manifiesto.vulnerabilidades) {
             si estado ignorado -> saltar.
@@ -315,7 +315,7 @@ clean_up.ps1 no tiene un switch por tipo. Hace esto:
             if ($ok) { estado = revertida } else { estado = fallida }
         }
 
-    2. Revertir objetos en orden inverso de creación (LIFO):
+  2. Revertir objetos en orden inverso de creación (LIFO):
 
         $objetosOrdenados = $manifiesto.objetos | Sort-Object timestamp -Descending
         foreach ($o in $objetosOrdenados) {
@@ -331,60 +331,58 @@ clean_up.ps1 no tiene un switch por tipo. Hace esto:
             if ($ok) { estado = revertido } else { estado = fallido }
         }
 
-POR QUÉ LIFO:
+## Por qué LIFO:
 
     Si una capacidad crea un objeto que depende de otro (por ejemplo, un
     AppRoleAssignment depende de un AppRole y de un User), revertir en orden
     inverso rompe las dependencias sin necesidad de un grafo explícito. Es el
     mismo principio que usa un finally anidado.
 
-POR QUÉ VULNERABILIDADES PRIMERO:
+## Por qué vulnerabilidades primero:
 
     Si una vulnerabilidad añadió un owner a un SP, quitar el owner antes de
     borrar el SP evita errores de Graph (no puedes borrar un objeto con
     owners si el owner no existe, etc.).
 
-SI UNA CAPACIDAD NO ESTÁ DISPONIBLE:
+## Si una capacidad no está disponible:
 
-    - Conservadora (recomendada): dejar el objeto/vulnerabilidad en el
+ - Conservadora (recomendada): dejar el objeto/vulnerabilidad en el
       manifiesto con estado no-revertido/no-revertida y avisar. El operador
       puede reactivar la capacidad y reejecutar el cleanup.
-    - Agresiva (opcional, con -Forzar): intentar un borrado genérico por tipo
+ - Agresiva (opcional, con -Forzar): intentar un borrado genérico por tipo
       para objetos (Usuario, Grupo, Aplicacion, ServicePrincipal). No funciona
       para vulnerabilidades: cada tipo sabe cómo revertirse.
 
 
 -------------------------------------------------------------------------------
-7. VERIFICACIÓN DE OBJECTID ANTES DE BORRAR
+# 7. VERIFICACIÓN DE OBJECTID ANTES DE BORRAR
 -------------------------------------------------------------------------------
 
 Antes de llamar a Revertir de cada objeto/vulnerabilidad, el cleanup verifica
 que el objectId del manifiesto coincide con el actual en el tenant.
 
-7.1. Objetos
+## 7.1. Objetos
 ------------
-    - Si el objeto ya no existe: idempotente, se puede "revertir" (no-op).
-    - Si el objeto existe y el objectId coincide: es el mismo objeto, se puede
+ - Si el objeto ya no existe: idempotente, se puede "revertir" (no-op).
+ - Si el objeto existe y el objectId coincide: es el mismo objeto, se puede
       borrar.
-    - Si el objeto existe pero el objectId NO coincide: es otro objeto con el
-      mismo nombre (borrado y recreado externamente). NO se borra. Se marca
+ - Si el objeto existe pero el objectId NO coincide: es otro objeto con el
+      mismo nombre (borrado y recreado externamente). **NO** se borra. Se marca
       como no-revertido y se avisa.
 
-    Tipos con verificación específica (Test-LabObjetoCoincideConManifiesto):
+ - Tipos con verificación específica (Test-LabObjetoCoincideConManifiesto):
         Usuario, Grupo, Aplicacion, ServicePrincipal, AdministrativeUnit.
-    El resto cae en default -> $true (se confía en el manifiesto).
+ - El resto cae en default -> $true (se confía en el manifiesto).
 
-7.2. Vulnerabilidades
+## 7.2. Vulnerabilidades
 ---------------------
-    - Test-LabVulnerabilidadCoincideConManifiesto verifica el objectId del
+ - Test-LabVulnerabilidadCoincideConManifiesto verifica el objectId del
       objeto afectado (objetoAfectadoObjectId en datos).
-    - Si el objeto ya no existe: idempotente (no-op en la verificación).
-    - Si el objectId coincide: se puede revertir.
-    - Si el objectId NO coincide: no se revierte, se marca no-revertida y se
-      avisa.
-
-    Tipos cubiertos:
-        ServicePrincipalOwner, GroupOwner, ApplicationSecret, PimEligibleRole.
+ - Si el objeto ya no existe: idempotente (no-op en la verificación).
+ - Si el objectId coincide: se puede revertir.
+ - Si el objectId NO coincide: no se revierte, se marca no-revertida y se avisa.
+ - Tipos cubiertos:
+       ServicePrincipalOwner, GroupOwner, ApplicationSecret, PimEligibleRole.
 
 Esta verificación es la última línea de defensa contra borrar objetos que no
 son del laboratorio. Si el manifiesto no tiene objectId (por ejemplo, migrado
@@ -392,10 +390,10 @@ de v1 sin ese dato), no se puede verificar y se confía en el manifiesto.
 
 
 -------------------------------------------------------------------------------
-8. MIGRACIÓN DESDE V1 Y V2
+# 8. MIGRACIÓN DESDE V1 Y V2
 -------------------------------------------------------------------------------
 
-8.1. V1 -> V2
+## 8.1. V1 -> V2
 -------------
 Los manifiestos v1 (sin manifestVersion o con listas por tipo) se migran
 automáticamente al cargar:
@@ -411,31 +409,31 @@ de preexistencia. Es un compromiso: si el objeto era preexistente, el cleanup
 intentará borrarlo. El operador debe revisar el manifiesto migrado antes de
 ejecutar el cleanup.
 
-8.2. V2 -> V2.1
+## 8.2. V2 -> V2.1
 ---------------
 En v2, las vulnerabilidades se guardaban en la lista 'objetos' con
 tipo = 'VulnerabilidadAplicada' y capacidad = 'Vulnerabilidades'. En v2.1
 viven en 'vulnerabilidades'.
 
-La migración v2 -> v2.1 (ConvertTo-LabManifiestoV21):
-    1. Separa los objetos con capacidad = 'Vulnerabilidades' (o tipo que
+### La migración v2 -> v2.1 (ConvertTo-LabManifiestoV21):
+ 1. Separa los objetos con capacidad = 'Vulnerabilidades' (o tipo que
        empiece por 'Vulnerab') del resto.
-    2. Los convierte a la forma de vulnerabilidad (id, nombre, tipo,
+ 2. Los convierte a la forma de vulnerabilidad (id, nombre, tipo,
        capacidad, estado, timestamp, datos).
-    3. Mapea el estado:
+ 3. Mapea el estado:
            'creado'        -> 'aplicada'
            'preexistente'  -> 'preexistente'
            'fallido'       -> 'fallida'
            'revertido'     -> 'revertida'
            'no-revertido'  -> 'no-revertida'
            'omitido'       -> 'omitida'
-    4. Deja el resto de objetos intactos.
-    5. Marca manifestVersion = '2.1'.
+ 4. Deja el resto de objetos intactos.
+ 5. Marca manifestVersion = '2.1'.
 
 Es automática al cargar con Get-LabManifiesto. El operador no tiene que hacer
 nada.
 
-8.3. Estructura del código de migración
+## 8.3. Estructura del código de migración
 ---------------------------------------
 La migración la hace lib_manifiesto.ps1:
     - ConvertTo-LabManifiestoV2  (v1 -> v2)
@@ -445,17 +443,17 @@ Se invocan automáticamente desde Get-LabManifiesto.
 
 
 -------------------------------------------------------------------------------
-9. GUARDADO Y RENOMBRADO
+# 9. GUARDADO Y RENOMBRADO
 -------------------------------------------------------------------------------
 
-Guardado:
+## Guardado:
 
     Save-LabManifiesto serializa el manifiesto con ConvertTo-Json -Depth 15.
     El manifiesto se MUTA durante la reversión: los estados cambian de creado a
     revertido (o fallido). Se guarda con el estado actualizado para que se pueda
     reintentar solo lo que falló.
 
-Renombrado:
+## Renombrado:
 
     Rename-LabManifiestoProcesado renombra el manifiesto con sufijo
     _procesado_<timestamp>.json cuando TODO se ha revertido (objetos y
@@ -466,21 +464,21 @@ Renombrado:
 
 
 -------------------------------------------------------------------------------
-10. SEGURIDAD
+# 10. SEGURIDAD
 -------------------------------------------------------------------------------
 
-    - El manifiesto NO contiene contraseñas. Solo guarda identificadores y
+ - El manifiesto NO contiene contraseñas. Solo guarda identificadores y
       datos necesarios para revertir.
-    - Las contraseñas se derivan de la semilla local del escenario y nunca se
+ - Las contraseñas se derivan de la semilla local del escenario y nunca se
       persisten en el manifiesto.
-    - El secreto de app (client secret) y el código TAP NO se guardan. Solo se
+ - El secreto de app (client secret) y el código TAP NO se guardan. Solo se
       guarda el keyId o el methodId para poder revocarlos.
-    - El manifiesto está en .gitignore (manifiesto_lab*.json). No debe
+ - El manifiesto está en .gitignore (manifiesto_lab*.json). No debe
       subirse a Git: contiene UPNs y nombres de objetos del tenant real.
 
 
 -------------------------------------------------------------------------------
-11. EJEMPLO COMPLETO V2.1
+# 11. EJEMPLO COMPLETO V2.1
 -------------------------------------------------------------------------------
 
     {
@@ -553,22 +551,22 @@ Renombrado:
 
 
 -------------------------------------------------------------------------------
-12. RESUMEN
+# 12. RESUMEN
 -------------------------------------------------------------------------------
 
-    - El manifiesto registra todo lo creado y modificado para poder revertirlo.
-    - Tiene metadatos, una lista plana de objetos y una lista de
+  - El manifiesto registra todo lo creado y modificado para poder revertirlo.
+  - Tiene metadatos, una lista plana de objetos y una lista de
       vulnerabilidades.
-    - Cada objeto/vulnerabilidad tiene id, tipo, capacidad, estado, timestamp,
+  - Cada objeto/vulnerabilidad tiene id, tipo, capacidad, estado, timestamp,
       tenantId y datos.
-    - datos es específico de la capacidad y debe bastar para revertir.
-    - El cleanup despacha por capacidad, revierte vulnerabilidades primero y
+  - datos es específico de la capacidad y debe bastar para revertir.
+  - El cleanup despacha por capacidad, revierte vulnerabilidades primero y
       objetos en LIFO.
-    - Verifica objectId antes de borrar (objetos y vulnerabilidades).
-    - Llama a PreRevertir si la capacidad lo implementa.
-    - Ignora preexistentes, revertidos/revertidas y no-revertidos/no-revertidas.
-    - Se migra automáticamente desde v1 (a v2) y desde v2 (a v2.1).
-    - No contiene contraseñas ni secretos.
-    - Detalle de vulnerabilidades en docs/vulnerabilidades.md.
+  - Verifica objectId antes de borrar (objetos y vulnerabilidades).
+  - Llama a PreRevertir si la capacidad lo implementa.
+  - Ignora preexistentes, revertidos/revertidas y no-revertidos/no-revertidas.
+  - Se migra automáticamente desde v1 (a v2) y desde v2 (a v2.1).
+  - No contiene contraseñas ni secretos.
+  - Detalle de vulnerabilidades en docs/vulnerabilidades.md.
 
 ===============================================================================

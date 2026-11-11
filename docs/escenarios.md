@@ -1,8 +1,8 @@
 ===============================================================================
-                               ESCENARIOS
+#                           ESCENARIOS
 ===============================================================================
 
-Un ESCENARIO es un fichero JSON que declara los objetos que se van a crear en
+Un **ESCENARIO** es un fichero JSON que declara los objetos que se van a crear en
 Entra ID: usuarios, grupos, aplicaciones, unidades administrativas, roles PIM,
 etc. El programa lo lee, lo normaliza y lo pasa a las capacidades para que cada
 una cree su parte.
@@ -10,7 +10,7 @@ una cree su parte.
 Este documento explica el formato del JSON, las secciones por capacidad, los
 alias aceptados, las plantillas y el modelo de semilla y contraseñas.
 
-NOTA SOBRE VULNERABILIDADES:
+**NOTA SOBRE VULNERABILIDADES:**
 Las vulnerabilidades NO forman parte del escenario. Son modificaciones
 maliciosas que se aplican sobre objetos existentes y tienen su propio flujo
 (menu.ps1 [5]). Su formato, catálogo y ciclo de vida se documentan en
@@ -18,7 +18,7 @@ docs/vulnerabilidades.md.
 
 
 -------------------------------------------------------------------------------
-1. ESTRUCTURA BÁSICA DEL JSON
+# 1. ESTRUCTURA BÁSICA DEL JSON
 -------------------------------------------------------------------------------
 
 Un escenario es un objeto JSON con metadatos y una o varias secciones:
@@ -33,7 +33,7 @@ Un escenario es un objeto JSON con metadatos y una o varias secciones:
       "relaciones": [ ... ]
     }
 
-CAMPOS DE METADATOS (opcionales, pero recomendados):
+**CAMPOS DE METADATOS** (opcionales, pero recomendados):
 
     nombre
         Nombre del escenario. Si falta, se usa el nombre del fichero.
@@ -50,13 +50,13 @@ en @().
 
 
 -------------------------------------------------------------------------------
-2. SECCIONES POR CAPACIDAD
+# 2. SECCIONES POR CAPACIDAD
 -------------------------------------------------------------------------------
 
 Cada sección corresponde a una capacidad. El nombre de la sección es el
 SeccionJson de la capacidad. Los alias permiten usar nombres alternativos.
 
-2.1. USUARIOS  (seccion: usuarios, alias: Usuarios)
+## 2.1. USUARIOS  (seccion: usuarios, alias: Usuarios)
 
     {
       "displayName": "Lucia Garcia",
@@ -76,7 +76,7 @@ SeccionJson de la capacidad. Los alias permiten usar nombres alternativos.
     creación. La contraseña NO va en el JSON: se deriva de la semilla.
 
 
-2.2. GRUPOS  (seccion: grupos, alias: Grupos)
+## 2.2. GRUPOS  (seccion: grupos, alias: Grupos)
 
     {
       "displayName": "Departamento de Ventas",
@@ -91,7 +91,7 @@ SeccionJson de la capacidad. Los alias permiten usar nombres alternativos.
         description, mailNickname
 
 
-2.3. RELACIONES  (seccion: relaciones, alias: Relaciones)
+## 2.3. RELACIONES  (seccion: relaciones, alias: Relaciones)
 
     {
       "tipo": "membresia",
@@ -106,7 +106,7 @@ SeccionJson de la capacidad. Los alias permiten usar nombres alternativos.
         tipo, usuario, grupo
 
 
-2.4. APLICACIONES  (seccion: aplicaciones, alias: Aplicaciones, apps)
+## 2.4. APLICACIONES  (seccion: aplicaciones, alias: Aplicaciones, apps)
 
     {
       "displayName": "Panel de Analisis Comercial",
@@ -128,7 +128,7 @@ SeccionJson de la capacidad. Los alias permiten usar nombres alternativos.
         PersonalMicrosoftAccount
 
 
-2.5. APPROLES  (seccion: appRoles, alias: app_roles)
+## 2.5. APPROLES  (seccion: appRoles, alias: app_roles)
 
     Definición de rol:
 
@@ -160,7 +160,7 @@ SeccionJson de la capacidad. Los alias permiten usar nombres alternativos.
         User, Application
 
 
-2.6. CREDENCIALESAPP  (seccion: credencialesApp, alias: credenciales_app, secrets)
+## 2.6. CREDENCIALESAPP  (seccion: credencialesApp, alias: credenciales_app, secrets)
 
     {
       "aplicacion": "Panel de Analisis Comercial",
@@ -178,7 +178,7 @@ SeccionJson de la capacidad. Los alias permiten usar nombres alternativos.
     SOLA VEZ al operador.
 
 
-2.7. PERMISOSAPI  (seccion: permisosApi, alias: permisos_api, apiPermissions)
+## 2.7. PERMISOSAPI  (seccion: permisosApi, alias: permisos_api, apiPermissions)
 
     {
       "aplicacion": "Panel de Analisis Comercial",
@@ -194,7 +194,7 @@ SeccionJson de la capacidad. Los alias permiten usar nombres alternativos.
         tipo (application o delegated; por defecto application)
 
 
-2.8. INVITADOS  (seccion: invitados, alias: guests)
+## 2.8. INVITADOS  (seccion: invitados, alias: guests)
 
     {
       "email": "invitado@contoso.com",
@@ -210,7 +210,7 @@ SeccionJson de la capacidad. Los alias permiten usar nombres alternativos.
         redirectUrl, sendMessage
 
 
-2.9. ADMINISTRATIVEUNITS  (seccion: administrativeUnits, solo P1+)
+## 2.9. ADMINISTRATIVEUNITS  (seccion: administrativeUnits, solo P1+)
 
     {
       "displayName": "AU Ventas",
@@ -228,7 +228,7 @@ SeccionJson de la capacidad. Los alias permiten usar nombres alternativos.
         description, members, roles
 
 
-2.10. GRUPOSDINAMICOS  (seccion: gruposDinamicos, solo P1+)
+## 2.10. GRUPOSDINAMICOS  (seccion: gruposDinamicos, solo P1+)
 
     {
       "displayName": "Dinamico Guests",
@@ -244,7 +244,7 @@ SeccionJson de la capacidad. Los alias permiten usar nombres alternativos.
         description, processingState (On o Paused; por defecto On)
 
 
-2.11. GRUPOSROLEASSIGNABLE  (seccion: gruposRoleAssignable, solo P1+)
+## 2.11. GRUPOSROLEASSIGNABLE  (seccion: gruposRoleAssignable, solo P1+)
 
     {
       "displayName": "RoleAssignable Ventas",
@@ -255,7 +255,7 @@ SeccionJson de la capacidad. Los alias permiten usar nombres alternativos.
         displayName
 
 
-2.12. LICENCIAS  (seccion: licencias, solo P1+)
+## 2.12. LICENCIAS  (seccion: licencias, solo P1+)
 
     {
       "usuario": "lucia.g@{tenant}",
@@ -273,7 +273,7 @@ SeccionJson de la capacidad. Los alias permiten usar nombres alternativos.
     tenant no tiene el SKU, se avisa y se omite.
 
 
-2.13. ACCESOCONDICIONAL  (seccion: accesoCondicional, solo P1+)
+## 2.13. ACCESOCONDICIONAL  (seccion: accesoCondicional, solo P1+)
 
     {
       "displayName": "CA MFA para admins",
@@ -299,7 +299,7 @@ SeccionJson de la capacidad. Los alias permiten usar nombres alternativos.
     manualmente tras revisar.
 
 
-2.14. METODOSAUTH  (seccion: metodosAuth, solo P1+)
+## 2.14. METODOSAUTH  (seccion: metodosAuth, solo P1+)
 
     {
       "usuario": "lucia.g@{tenant}",
@@ -319,7 +319,7 @@ SeccionJson de la capacidad. Los alias permiten usar nombres alternativos.
     SOLA VEZ.
 
 
-2.15. PIM  (seccion: pim, solo P2)
+## 2.15. PIM  (seccion: pim, solo P2)
 
     {
       "usuario": "lucia.g@{tenant}",
@@ -337,7 +337,7 @@ SeccionJson de la capacidad. Los alias permiten usar nombres alternativos.
 
 
 -------------------------------------------------------------------------------
-3. ALIAS ACEPTADOS
+# 3. ALIAS ACEPTADOS
 -------------------------------------------------------------------------------
 
 Cada capacidad declara un SeccionJson y, opcionalmente, una lista de Alias. El
@@ -367,17 +367,17 @@ compatibilidad con escenarios escritos en español o en versiones anteriores.
                                               authenticationMethods
     Pim                  pim                  PIM, rolesElegibles
 
-NOTA: 'Vulnerabilidades' no aparece en esta tabla porque no es una sección del
+**NOTA:** 'Vulnerabilidades' no aparece en esta tabla porque no es una sección del
 escenario. Sus alias ('vulnerabilidades', 'vulnerabilidad', 'vulnerability',
 'vulns') solo se usan internamente para detectar escenarios antiguos que aún
 tengan esa clave; en ese caso, caerían en Desconocidas y no se aplicarían.
 
 
 -------------------------------------------------------------------------------
-4. PLANTILLAS
+# 4. PLANTILLAS
 -------------------------------------------------------------------------------
 
-Una PLANTILLA es un escenario normalizado que se usa como esqueleto en el flujo
+Una **PLANTILLA** es un escenario normalizado que se usa como esqueleto en el flujo
 de creación automática (nivel -> tipo -> crear). Vive en
 escenarios/plantillas/*.json.
 
@@ -401,7 +401,7 @@ vulnerabilidades, las crea desde menu.ps1 [5] tras crear el escenario.
 
 
 -------------------------------------------------------------------------------
-5. NORMALIZACIÓN Y VALIDACIÓN
+# 5. NORMALIZACIÓN Y VALIDACIÓN
 -------------------------------------------------------------------------------
 
 El programa no lee el JSON directamente. Lo pasa por
@@ -423,18 +423,18 @@ El normalizador descubre las secciones a partir de las capacidades
 registradas. Si una sección no la reclama ninguna capacidad, va a Desconocidas
 y se preserva en RawDesconocidas.
 
-CAPACIDADES SIN SECCIÓN:
+**CAPACIDADES SIN SECCIÓN:**
 Las capacidades con SeccionJson = $null (Vulnerabilidades) no crean entrada
 en Secciones. Si un escenario antiguo tuviera una clave con su Alias, caería
 en Desconocidas y no se procesaría.
 
 La validación se hace en dos fases:
 
-    FASE 1: normalización
+  1. normalización
         JSON válido, secciones son arrays u objetos, versión reconocible.
         Los problemas van a Errores.
 
-    FASE 2: validación por capacidad
+  2. validación por capacidad
         Invoke-LabValidacionEscenario recorre las secciones no vacías y llama
         a ValidarDef de cada capacidad. Devuelve un array de errores.
 
@@ -442,10 +442,10 @@ Si hay errores en cualquier fase, creauto.ps1 aborta antes de crear nada.
 
 
 -------------------------------------------------------------------------------
-6. MODELO DE SEMILLA Y CONTRASEÑAS
+# 6. MODELO DE SEMILLA Y CONTRASEÑAS
 -------------------------------------------------------------------------------
 
-Los escenarios NO contienen contraseñas. Cada escenario tiene una semilla local
+Los escenarios **NO** contienen contraseñas. Cada escenario tiene una semilla local
 en escenarios/.secrets/<escenario>.seed (32 bytes aleatorios en Base64, fuera
 de Git). De ella se deriva la contraseña de cada usuario:
 
@@ -466,7 +466,7 @@ En ningún caso la contraseña se guarda en el manifiesto ni en el JSON.
 
 
 -------------------------------------------------------------------------------
-7. EJEMPLO COMPLETO (FREE)
+# 7. EJEMPLO COMPLETO (FREE)
 -------------------------------------------------------------------------------
 
     {
@@ -508,7 +508,7 @@ En ningún caso la contraseña se guarda en el manifiesto ni en el JSON.
 
 
 -------------------------------------------------------------------------------
-8. EJEMPLO COMPLETO (P1 + P2)
+# 8. EJEMPLO COMPLETO (P1 + P2)
 -------------------------------------------------------------------------------
 
     {
@@ -585,18 +585,18 @@ En ningún caso la contraseña se guarda en el manifiesto ni en el JSON.
 
 
 -------------------------------------------------------------------------------
-9. RESUMEN
+# 9. RESUMEN
 -------------------------------------------------------------------------------
 
-    - Un escenario es un JSON con metadatos y secciones por capacidad.
-    - Cada sección es un array de objetos.
-    - Los alias permiten nombres alternativos (español, versiones antiguas).
-    - Las plantillas son esqueletos para el flujo nivel -> tipo.
-    - El normalizador descubre secciones a partir de las capacidades.
-    - La validación se hace en dos fases: normalización y por capacidad.
-    - Las contraseñas no van en el JSON: se derivan de la semilla local.
-    - El secreto de app y el código TAP se muestran una sola vez.
-    - Las vulnerabilidades NO forman parte del escenario.
-      Ver docs/vulnerabilidades.md.
+   - Un escenario es un JSON con metadatos y secciones por capacidad.
+   - Cada sección es un array de objetos.
+   - Los alias permiten nombres alternativos (español, versiones antiguas).
+   - Las plantillas son esqueletos para el flujo nivel -> tipo.
+   - El normalizador descubre secciones a partir de las capacidades.
+   - La validación se hace en dos fases: normalización y por capacidad.
+   - Las contraseñas no van en el JSON: se derivan de la semilla local.
+   - El secreto de app y el código TAP se muestran una sola vez.
+   - Las vulnerabilidades NO forman parte del escenario.
+     Ver docs/vulnerabilidades.md.
 
 ===============================================================================

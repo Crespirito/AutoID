@@ -1,5 +1,5 @@
 ===============================================================================
-                              CAPACIDADES
+#                             CAPACIDADES
 ===============================================================================
 
 Una CAPACIDAD es un plugin autocontenido que implementa una funcionalidad del
@@ -10,7 +10,7 @@ descubre al arrancar y las usa a través de un contrato fijo.
 Este documento explica el contrato, cómo añadir o quitar capacidades, y las
 capacidades disponibles por nivel.
 
-NOTA SOBRE VULNERABILIDADES:
+**NOTA SOBRE VULNERABILIDADES:**
 La capacidad 'Vulnerabilidades' es especial: no consume una sección del
 escenario (SeccionJson = $null). Se aplica sobre objetos existentes desde
 un flujo dedicado en menu.ps1 [5]. Su contrato y su catálogo se documentan
@@ -19,7 +19,7 @@ de capacidades.
 
 
 -------------------------------------------------------------------------------
-1. ESTRUCTURA DE UNA CAPACIDAD
+# 1. ESTRUCTURA DE UNA CAPACIDAD
 -------------------------------------------------------------------------------
 
 Cada capacidad vive en un archivo cap_*.ps1 dentro de lib_caps/<nivel>/:
@@ -39,26 +39,23 @@ Cada capacidad vive en un archivo cap_*.ps1 dentro de lib_caps/<nivel>/:
             cap_pim.ps1
             cap_metodos_auth.ps1
 
-LA CARPETA DETERMINA EL NIVEL de la capacidad:
+### LA CARPETA DETERMINA EL NIVEL de la capacidad:
 
     free/   ->  disponible en Entra ID Free.
     p1/     ->  requiere Entra ID P1 (o P2).
     p2/     ->  requiere Entra ID P2.
 
-Renombrar p2/ a p2.disabled/ desactiva P2 sin tocar código. El loader
-ignora cualquier carpeta que no se llame exactamente free, p1 o p2.
+Renombrar p2/ a p2.disabled/ desactiva P2 sin tocar código. El loader ignora cualquier carpeta que no se llame exactamente free, p1 o p2.
 
 
 -------------------------------------------------------------------------------
-2. EL CONTRATO DE CAPACIDAD
+# 2. EL CONTRATO DE CAPACIDAD
 -------------------------------------------------------------------------------
 
-Cada cap_*.ps1 declara un hashtable $Capacidad y lo registra con
-Register-LabCapacidad. El hashtable debe tener los campos obligatorios y
-puede tener los opcionales.
+Cada cap_*.ps1 declara un hashtable $Capacidad y lo registra con Register-LabCapacidad. El hashtable debe tener los campos obligatorios y puede tener los opcionales.
 
 
-2.1. CAMPOS OBLIGATORIOS
+## 2.1. CAMPOS OBLIGATORIOS
 ------------------------
 
     CAMPO            TIPO            PROPÓSITO
@@ -85,7 +82,7 @@ puede tener los opcionales.
                                      Solo para menú manual.
 
 
-2.2. CAMPOS OPCIONALES
+## 2.2. CAMPOS OPCIONALES
 ----------------------
 
     CAMPO            TIPO            PROPÓSITO
@@ -103,7 +100,7 @@ puede tener los opcionales.
                                      asignación PIM activa).
 
 
-2.3. EL $Contexto
+## 2.3. EL $Contexto
 -----------------
 
 El contexto es un hashtable que el núcleo pasa a TestDisponible, Crear,
@@ -128,11 +125,11 @@ Revertir y PreguntarUI. Contiene:
     VulnerabilidadesExcluidas array     Nombres a excluir (solo
                                      Vulnerabilidades).
 
-REGLA: las capacidades no modifican $Contexto directamente. Si necesitan
+**REGLA:** las capacidades no modifican $Contexto directamente. Si necesitan
 compartir algo, usan $Contexto.ObjetosCreados[$suCapacidad].
 
 
-2.4. FORMA DE LOS OBJETOS CREADOS
+## 2.4. FORMA DE LOS OBJETOS CREADOS
 ---------------------------------
 
 Cada objeto que Crear devuelve debe tener, como mínimo:
@@ -148,7 +145,7 @@ datos. La capacidad solo se preocupa de tipo, estadoDetalle y sus datos.
 
 
 -------------------------------------------------------------------------------
-3. CÓMO SE REGISTRA UNA CAPACIDAD
+# 3. CÓMO SE REGISTRA UNA CAPACIDAD
 -------------------------------------------------------------------------------
 
 Al final de cada cap_*.ps1:
@@ -182,60 +179,57 @@ sistema de capacidades y aparecen en [K] Ver capacidades.
 
 
 -------------------------------------------------------------------------------
-4. CÓMO AÑADIR UNA CAPACIDAD NUEVA
+# 4. CÓMO AÑADIR UNA CAPACIDAD NUEVA
 -------------------------------------------------------------------------------
 
-    1. Crear el archivo lib_caps/<nivel>/cap_<nombre>.ps1.
-    2. Declarar $Capacidad con los campos obligatorios y los opcionales
-       que apliquen.
-    3. Implementar los scriptblocks según el contrato.
-    4. Registrarla con Register-LabCapacidad -Capacidad $Capacidad.
-    5. Añadir Descripcion en español para el menú.
-    6. Añadir Alias con la versión española de la sección si aplica.
-    7. Probar con menu.ps1 -> [K] Ver capacidades para confirmar que se
-       registra.
+   1. Crear el archivo lib_caps/<nivel>/cap_<nombre>.ps1.
+   2. Declarar $Capacidad con los campos obligatorios y los opcionales que apliquen.
+   3. Implementar los scriptblocks según el contrato.
+   4. Registrarla con Register-LabCapacidad -Capacidad $Capacidad.
+   5. Añadir Descripcion en español para el menú.
+   6. Añadir Alias con la versión española de la sección si aplica.
+   7. Probar con menu.ps1 -> [K] Ver capacidades para confirmar que se registra.
 
 No hay que tocar lib_caps.ps1, lib_creadores.ps1, menu.ps1, creauto.ps1,
 creamanual.ps1 ni clean_up.ps1. La capacidad aparece automáticamente en el
 flujo automático (si el escenario declara su sección) y en el menú manual.
 
-EXCEPCIÓN: si la capacidad no consume sección del escenario
+**EXCEPCIÓN:** si la capacidad no consume sección del escenario
 (SeccionJson = $null), hay que añadir un flujo dedicado en menu.ps1. Es el
 caso de Vulnerabilidades ([5] y [6]). Ver docs/vulnerabilidades.md.
 
 
 -------------------------------------------------------------------------------
-5. CÓMO QUITAR UNA CAPACIDAD
+# 5. CÓMO QUITAR UNA CAPACIDAD
 -------------------------------------------------------------------------------
 
-OPCIÓN 1: BORRAR EL ARCHIVO
+1. BORRAR EL ARCHIVO
     Se elimina del registro y el programa sigue funcionando. Los escenarios
     que declaren su sección fallarán la validación con un mensaje claro.
 
-OPCIÓN 2: RENOMBRAR LA CARPETA DEL NIVEL
+2. RENOMBRAR LA CARPETA DEL NIVEL
     p2/ -> p2.disabled/. El loader no la encuentra y todas las capacidades
     de ese nivel quedan desactivadas. Es la forma de hacer una distribución
     "solo hasta P1" o "solo Free".
 
-OPCIÓN 3: RENOMBRAR EL ARCHIVO
+3. RENOMBRAR EL ARCHIVO
     cap_pim.ps1 -> cap_pim.ps1.disabled. El loader no lo encuentra (solo
     carga cap_*.ps1) y esa capacidad concreta desaparece.
 
 En los tres casos, el programa no requiere cambios. Los escenarios que usen
-la sección eliminada fallan con "capacidad no registrada" o "carpeta
-desactivada".
+la sección eliminada fallan con "capacidad no registrada" o "carpeta desactivada".
 
-CASO ESPECIAL: VULNERABILIDADES
-    - Si se borra cap_vulnerabilidades.ps1, el menú [5] avisa y no permite
+**CASO ESPECIAL: VULNERABILIDADES**
+- Si se borra cap_vulnerabilidades.ps1, el menú [5] avisa y no permite
       crear vulnerabilidades.
-    - Si se renombra p2/ a p2.disabled/, PimEligibleRole no se ofrece
+- Si se renombra p2/ a p2.disabled/, PimEligibleRole no se ofrece
       (aparece deshabilitado con motivo en [5]).
-    - Las vulnerabilidades pendientes en el manifiesto se marcan como
+- Las vulnerabilidades pendientes en el manifiesto se marcan como
       no-revertidas al limpiar, con aviso.
 
 
 -------------------------------------------------------------------------------
-6. CAPACIDADES DISPONIBLES POR NIVEL
+# 6. CAPACIDADES DISPONIBLES POR NIVEL
 -------------------------------------------------------------------------------
 
 FREE
@@ -278,7 +272,7 @@ P2
 
 
 -------------------------------------------------------------------------------
-7. LICENCIAS Y TestDisponible
+# 7. LICENCIAS Y TestDisponible
 -------------------------------------------------------------------------------
 
 Cada capacidad decide en TestDisponible si puede operar en el tenant actual.
@@ -291,11 +285,11 @@ Si no encuentran el plan, devuelven Disponible = $false con un motivo claro.
 El menú manual filtra esas capacidades automáticamente
 (Get-LabCapacidades -SoloDisponibles). El flujo automático las omite con aviso.
 
-IMPORTANTE: la comprobación está en la capacidad, no en el menú. Eso mantiene
+**IMPORTANTE:** la comprobación está en la capacidad, no en el menú. Eso mantiene
 la modularidad: añadir una capacidad nueva con requisito de licencia solo
 requiere implementar su TestDisponible.
 
-TESTDISPONIBLE CON TIPOS:
+**TEST DISPONIBLE CON TIPOS:**
 Algunas capacidades agrupan varios tipos con niveles distintos. Es el caso
 de Vulnerabilidades, que en un solo archivo ofrece tipos Free y P2. En esos
 casos, TestDisponible puede devolver un campo extra TiposDisponibles con los
@@ -304,7 +298,7 @@ mostrar solo lo disponible. Ver docs/vulnerabilidades.md sección 3.
 
 
 -------------------------------------------------------------------------------
-8. EJEMPLO MÍNIMO
+# 8. EJEMPLO MÍNIMO
 -------------------------------------------------------------------------------
 
     $Capacidad = @{
@@ -371,17 +365,17 @@ mostrar solo lo disponible. Ver docs/vulnerabilidades.md sección 3.
 
 
 -------------------------------------------------------------------------------
-9. RESUMEN
+# 9. RESUMEN
 -------------------------------------------------------------------------------
 
-    - Una capacidad = un archivo cap_*.ps1 en lib_caps/<nivel>/.
-    - La carpeta determina el nivel.
-    - El contrato tiene 10 campos obligatorios y 6 opcionales.
-    - Añadir capacidad = añadir archivo.
-      Quitar = borrar archivo o renombrar carpeta.
-    - La comprobación de licencia vive en TestDisponible, no en el menú.
-    - El núcleo no conoce tipos concretos.
-    - Vulnerabilidades es especial: SeccionJson = $null, flujo dedicado.
-      Ver docs/vulnerabilidades.md.
+ - Una capacidad = un archivo cap_*.ps1 en lib_caps/<nivel>/.
+ - La carpeta determina el nivel.
+ - El contrato tiene 10 campos obligatorios y 6 opcionales.
+ - Añadir capacidad = añadir archivo.
+ - Quitar = borrar archivo o renombrar carpeta.
+ - La comprobación de licencia vive en TestDisponible, no en el menú.
+ - El núcleo no conoce tipos concretos.
+ - Vulnerabilidades es especial: SeccionJson = $null, flujo dedicado.
+     Ver docs/vulnerabilidades.md.
 
 ===============================================================================
