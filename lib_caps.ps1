@@ -196,8 +196,7 @@ function Test-LabCicloDependencias {
         [Parameter(Mandatory = $true)]
         [hashtable]$Capacidad,
 
-        [Parameter(Mandatory = $true)]
-        [array]$Visitados
+        [array]$Visitados = @()
     )
 
     if ($Visitados -contains $Nombre) { return $true }

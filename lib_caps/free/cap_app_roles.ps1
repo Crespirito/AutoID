@@ -61,12 +61,12 @@ $Capacidad = @{
                 if ([string]::IsNullOrWhiteSpace($r.value)) {
                     $errores += "Definición de rol #$i sin 'value'."
                 } elseif ($r.value -match '\s') {
-                    $errores += "Definición de rol #$i: 'value' no puede contener espacios."
+                    $errores += "Definición de rol #`${i}: 'value' no puede contener espacios."
                 }
                 if ($r.PSObject.Properties['allowedMemberTypes'] -and $null -ne $r.allowedMemberTypes) {
                     foreach ($t in @($r.allowedMemberTypes)) {
                         if ($t -notin @('User','Application')) {
-                            $errores += "Definición de rol #$i: allowedMemberTypes inválido: '$t'."
+                            $errores += "Definición de rol #`${i}: allowedMemberTypes inválido: '$t'."
                         }
                     }
                 }

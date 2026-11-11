@@ -82,7 +82,9 @@ if (-not (Test-LabGraphSession)) {
 # CONFIGURACIÓN Y CAPACIDADES
 # ============================================================
 $config = Get-LabConfig
-$null = Initialize-LabCapacidades -Root (Join-Path $PSScriptRoot 'lib_caps')
+if ((Get-LabCapacidades).Count -eq 0) {
+    $null = Initialize-LabCapacidades -Root (Join-Path $PSScriptRoot 'lib_caps')
+}
 
 if (-not $ManifiestoPath) {
     $ManifiestoPath = Get-LabManifiestoPath

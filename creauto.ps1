@@ -337,7 +337,7 @@ Write-Host ''
 
 # 5. Validación
 $errores = Invoke-LabValidacionEscenario -EscenarioNormalizado $esc -Contexto @{ Nivel = $nivelElegido }
-if ($errores.Count -gt 0) {
+if (@($errores).Count -gt 0) {
     Write-LabError 'El escenario tiene errores de validación:'
     foreach ($e in $errores) { Write-Host "  - $e" -ForegroundColor Red }
     exit 1

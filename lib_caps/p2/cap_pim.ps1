@@ -78,7 +78,7 @@ $Capacidad = @{
             }
             if ($p.PSObject.Properties['duracion'] -and $p.duracion) {
                 if ($p.duracion -notmatch '^PT\d+[HM]$') {
-                    $errores += "Rol PIM #$i: 'duracion' inválida ('$($p.duracion)'). Formato esperado: PT8H, PT30M, etc."
+                    $errores += "Rol PIM #`${i}: 'duracion' inválida ('$($p.duracion)'). Formato esperado: PT8H, PT30M, etc."
                 }
             }
         }

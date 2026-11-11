@@ -201,9 +201,6 @@ function ConvertTo-LabEscenarioNormalizado {
     foreach ($cap in $capacidades) {
         $nombreCap = $cap.Nombre
 
-        # Capacidades sin SeccionJson (p. ej. Vulnerabilidades) no consumen
-        # sección del escenario: se aplican desde un flujo dedicado. No
-        # creamos entrada en Secciones para evitar ruido en bucles posteriores.
         if ([string]::IsNullOrWhiteSpace($cap.SeccionJson)) {
             continue
         }
@@ -220,9 +217,10 @@ function ConvertTo-LabEscenarioNormalizado {
 
         if ($encontrada) {
             $valor = $Raw.$encontrada
-            if ($null -eq $valor) {
+            if ($null -eq $valor -or [string]::IsNullOrWhiteSpace([string]$valor)) {
                 $secciones[$nombreCap] = @()
             } else {
+                # IMPORTANTE: Forzamos a array incluso si solo hay un elemento o es una propiedad Count
                 $secciones[$nombreCap] = @($valor)
             }
             $clavesJson = @($clavesJson | Where-Object { $_ -ne $encontrada })

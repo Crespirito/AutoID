@@ -79,7 +79,7 @@ $Capacidad = @{
             if ($m.PSObject.Properties['lifetimeInMinutes'] -and $null -ne $m.lifetimeInMinutes) {
                 $lt = [int]$m.lifetimeInMinutes
                 if ($lt -lt 10 -or $lt -gt 43200) {
-                    $errores += "Método #$i: 'lifetimeInMinutes' debe estar entre 10 y 43200."
+                    $errores += "Método #`${i}: 'lifetimeInMinutes' debe estar entre 10 y 43200."
                 }
             }
         }

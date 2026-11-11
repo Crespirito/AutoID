@@ -73,12 +73,12 @@ $Capacidad = @{
                 $errores += "Grupo dinámico #$i sin 'membershipRule'."
             } else {
                 if (-not ($g.membershipRule -match '^\s*\(')) {
-                    $errores += "Grupo dinámico #$i: 'membershipRule' debe empezar por '('."
+                    $errores += "Grupo dinámico #`${i}: 'membershipRule' debe empezar por '('."
                 }
             }
             if ($g.PSObject.Properties['processingState'] -and $g.processingState) {
                 if ($g.processingState -notin @('On','Paused')) {
-                    $errores += "Grupo dinámico #$i: 'processingState' inválido ('$($g.processingState)'). Debe ser 'On' o 'Paused'."
+                    $errores += "Grupo dinámico #`${i}: 'processingState' inválido ('$($g.processingState)'). Debe ser 'On' o 'Paused'."
                 }
             }
         }

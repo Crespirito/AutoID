@@ -170,7 +170,7 @@ function Select-LabEscenarioInicial {
         $escenarios = Get-LabEscenariosDisponibles
         if ($escenarios.Count -eq 0) {
             Write-LabWarn 'No hay escenarios disponibles. Se empieza de cero.'
-            return (ConvertTo-LabEscenarioNormalizado -Raw ([pscustomobject]@{}))
+           return (ConvertTo-LabEscenarioNormalizado -Raw ([pscustomobject]@{ nombre = $null }))
         }
 
         Write-Host ''
@@ -321,8 +321,17 @@ function Invoke-BorrarObjetoLocal {
 
 # 1. Cargar o empezar de cero
 $esc = Select-LabEscenarioInicial
-$esc.Nombre = if ($esc.Nombre) { $esc.Nombre } else { 'manual_' + (Get-Date -Format 'yyyyMMdd_HHmmss') }
 
+# Comprobar si tiene nombre sin que StrictMode se queje
+$tieneNombre = $false
+if ($esc.PSObject.Properties['Nombre'] -and -not [string]::IsNullOrWhiteSpace($esc.Nombre)) {
+    $tieneNombre = $true
+}
+
+if (-not $tieneNombre) {
+    $nombreAuto = 'manual_' + (Get-Date -Format 'yyyyMMdd_HHmmss')
+    $esc | Add-Member -NotePropertyName 'Nombre' -NotePropertyValue $nombreAuto -Force
+}
 # 2. Semilla de la sesión manual
 $nombreSemilla = 'manual_' + (Get-Date -Format 'yyyyMMdd_HHmmss')
 $semilla = Get-LabSeed -NombreEscenario $nombreSemilla
@@ -392,7 +401,7 @@ while (-not $salir) {
             foreach ($nombreCap in $esc.Secciones.Keys) {
                 $def = @($esc.Secciones[$nombreCap])
                 if ($def.Count -eq 0) { continue }
-                Write-Host "  $nombreCap:" -ForegroundColor Cyan
+                Write-Host "  ${nombreCap}:" -ForegroundColor Cyan
                 foreach ($d in $def) {
                     Write-Host "    - $($d | ConvertTo-Json -Compress)" -ForegroundColor Gray
                 }

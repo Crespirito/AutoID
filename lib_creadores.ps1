@@ -419,7 +419,7 @@ function Get-LabOrdenCapacidades {
     $visitados = @{}
     $enProceso = @{}
 
-    function Visit-LabCap {
+    function Resolve-LabCap {
         param($nombre)
         if ($visitados.ContainsKey($nombre)) { return }
         if ($enProceso.ContainsKey($nombre)) {
@@ -432,7 +432,7 @@ function Get-LabOrdenCapacidades {
         if ($cap) {
             foreach ($dep in @($cap.DependeDe)) {
                 if ($conDef -contains $dep) {
-                    Visit-LabCap -nombre $dep
+                    Resolve-LabCap -nombre $dep
                 }
             }
         }
@@ -443,7 +443,7 @@ function Get-LabOrdenCapacidades {
     }
 
     foreach ($n in $conDef) {
-        Visit-LabCap -nombre $n
+        Resolve-LabCap -nombre $n
     }
     return $script:LabOrdenTemp
 }

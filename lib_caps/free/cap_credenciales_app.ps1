@@ -56,10 +56,10 @@ $Capacidad = @{
                 try {
                     $fecha = [datetime]$c.endDateTime
                     if ($fecha -lt (Get-Date)) {
-                        $errores += "Credencial #$i: 'endDateTime' ya ha pasado ($fecha)."
+                        $errores += "Credencial #`${i}: 'endDateTime' ya ha pasado ($fecha)."
                     }
                 } catch {
-                    $errores += "Credencial #$i: 'endDateTime' inválido ('$($c.endDateTime)')."
+                    $errores += "Credencial #`${i}: 'endDateTime' inválido ('$($c.endDateTime)')."
                 }
             }
         }

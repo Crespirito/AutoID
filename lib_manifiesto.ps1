@@ -672,7 +672,8 @@ function Add-LabManifiestoVulnerabilidad {
         throw 'Add-LabManifiestoVulnerabilidad: -Capacidad es obligatorio.'
     }
 
-    $id = 'vuln-{0:D4}' -f ($Manifiesto.vulnerabil
+    $id = 'vuln-{0:D4}' -f ($Manifiesto.vulnerabilidades.Count + 1)
+    
     $v = [pscustomobject]@{
         id        = $id
         nombre    = $Nombre
@@ -682,6 +683,7 @@ function Add-LabManifiestoVulnerabilidad {
         timestamp = (Get-Date).ToString('o')
         datos     = $Datos
     }
+    
     $Manifiesto.vulnerabilidades += $v
     return $v
 }
