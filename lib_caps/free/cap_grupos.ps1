@@ -15,13 +15,18 @@
     - Si no existe, se crea.
 
     NIVEL: Free.
+.NOTES
+    Requiere PowerShell 7.
 #>
+#Requires -Version 7.0
+
+# Set-StrictMode -Version Latest
 
 $Capacidad = @{
     Nombre      = 'Grupos'
     Descripcion = 'Grupos de seguridad'
     SeccionJson = 'grupos'
-    Alias       = @('Grupos','grupos')
+    Alias       = @('Grupos')
     Nivel       = 'Free'
     DependeDe   = @()
     PermisosApp = @('Group.ReadWrite.All')
@@ -61,7 +66,9 @@ $Capacidad = @{
         foreach ($g in @($Def)) {
             $displayName = $g.displayName
             $description = if ($g.PSObject.Properties['description']) { $g.description } else { '' }
-            $mailNickname = if ($g.PSObject.Properties['mailNickname'] -and $g.mailNickname) {
+            
+            # Generar mailNickname si no existe
+            $mailNickname = if ($g.PSObject.Properties['mailNickname'] -and -not [string]::IsNullOrWhiteSpace($g.mailNickname)) {
                 $g.mailNickname
             } else {
                 $displayName -replace '[^a-zA-Z0-9]', ''
@@ -82,7 +89,9 @@ $Capacidad = @{
             }
 
             # --- 2. ¿Existe ya en el tenant? ---
-            $existing = Get-MgGroup -Filter "displayName eq '$displayName'" -ErrorAction SilentlyContinue
+            # N14: escapado OData
+            $displayNameEscapado = $displayName -replace "'","''"
+            $existing = Get-MgGroup -Filter "displayName eq '$displayNameEscapado'" -ErrorAction SilentlyContinue
             if ($existing) {
                 if ($existing -is [array]) { $existing = $existing[0] }
                 Write-Verbose "   -> Grupo existe: $displayName (reutilizado)"
@@ -131,7 +140,9 @@ $Capacidad = @{
         }
 
         try {
-            $grupo = Get-MgGroup -Filter "displayName eq '$displayName'" -ErrorAction SilentlyContinue
+            # N14: escapado OData
+            $displayNameEscapado = $displayName -replace "'","''"
+            $grupo = Get-MgGroup -Filter "displayName eq '$displayNameEscapado'" -ErrorAction SilentlyContinue
             if (-not $grupo) { return $true }
             if ($grupo -is [array]) { $grupo = $grupo[0] }
 
@@ -141,15 +152,20 @@ $Capacidad = @{
                 return $false
             }
 
-            # Vaciar miembros y owners antes de borrar
-            $miembros = Get-MgGroupMember -GroupId $grupo.Id -All -ErrorAction SilentlyContinue
-            foreach ($m in $miembros) {
-                $null = Remove-MgGroupMemberByRef -GroupId $grupo.Id -DirectoryObjectId $m.Id -Confirm:$false -ErrorAction SilentlyContinue
-            }
-            $owners = Get-MgGroupOwner -GroupId $grupo.Id -All -ErrorAction SilentlyContinue
-            foreach ($o in $owners) {
-                $null = Remove-MgGroupOwnerByRef -GroupId $grupo.Id -DirectoryObjectId $o.Id -Confirm:$false -ErrorAction SilentlyContinue
-            }
+            # Vaciar miembros y owners antes de borrar (evita error 400 en Graph)
+            try {
+                $miembros = Get-MgGroupMember -GroupId $grupo.Id -All -ErrorAction SilentlyContinue
+                foreach ($m in @($miembros)) {
+                    $null = Remove-MgGroupMemberByRef -GroupId $grupo.Id -DirectoryObjectId $m.Id -Confirm:$false -ErrorAction SilentlyContinue
+                }
+            } catch { }
+
+            try {
+                $owners = Get-MgGroupOwner -GroupId $grupo.Id -All -ErrorAction SilentlyContinue
+                foreach ($o in @($owners)) {
+                    $null = Remove-MgGroupOwnerByRef -GroupId $grupo.Id -DirectoryObjectId $o.Id -Confirm:$false -ErrorAction SilentlyContinue
+                }
+            } catch { }
 
             $null = Remove-MgGroup -GroupId $grupo.Id -Confirm:$false -ErrorAction Stop
             return $true
@@ -187,4 +203,4 @@ $Capacidad = @{
     }
 }
 
-Register-LabCapacidad -Capacidad $Capacidad
+$null = Register-LabCapacidad -Capacidad $Capacidad

@@ -6,23 +6,27 @@
     a partir de la sección 'gruposDinamicos' del escenario.
 
     LICENCIA:
-    Los grupos dinámicos requieren Microsoft Entra ID P1 (o P2, que incluye
-    P1). TestDisponible consulta los SKUs del tenant y comprueba si existe
-    el plan de servicio 'AAD_PREMIUM' o 'AAD_PREMIUM_P2' con estado 'Success'.
-    Si no existe, la capacidad no se ofrece en el menú manual y se omite
-    en el flujo automático.
+    Los grupos dinámicos requieren Microsoft Entra ID P1 (o P2).
+    TestDisponible consulta los SKUs del tenant (cacheada vía
+    Get-LabSubscribedSku).
 
     SEGURIDAD DE PREEXISTENTES:
     - Si el displayName está en el snapshot pre-lab, el grupo existía antes
       del laboratorio. Se marca 'preexistente' y no se modifica.
 
-    NIVEL: P1 (el nivel mínimo de licencia que la capacidad puede necesitar).
+    NIVEL: P1.
+.NOTES
+    Requiere PowerShell 7.
 #>
+#Requires -Version 7.0
+
+# Set-StrictMode -Version Latest
 
 $Capacidad = @{
     Nombre      = 'GruposDinamicos'
+    Descripcion = 'Grupos dinámicos'
     SeccionJson = 'gruposDinamicos'
-    Alias       = @('gruposDinamicos','dynamicGroups','dynamic_groups')
+    Alias       = @('dynamicGroups', 'dynamic_groups')
     Nivel       = 'P1'
     DependeDe   = @()
     PermisosApp = @('Group.ReadWrite.All','Group.Create')
@@ -33,28 +37,25 @@ $Capacidad = @{
             return [pscustomobject]@{ Disponible = $false; Motivo = 'Sin sesión de Graph' }
         }
         try {
-            $skus = Get-MgSubscribedSku -ErrorAction Stop
+            # N7: usar caché
+            $skus = @(Get-LabSubscribedSku)
             $tieneP1 = $false
-            foreach ($sku in @($skus)) {
-                foreach ($plan in @($sku.ServicePlans)) {
-                    if ($plan.ServicePlanName -in @('AAD_PREMIUM','AAD_PREMIUM_P2') -and
-                        $plan.ProvisioningStatus -eq 'Success') {
-                        $tieneP1 = $true
-                        break
+            foreach ($sku in $skus) {
+                if ($sku.PSObject.Properties['ServicePlans'] -and $null -ne $sku.ServicePlans) {
+                    foreach ($plan in @($sku.ServicePlans)) {
+                        if ($plan.ServicePlanName -in @('AAD_PREMIUM','AAD_PREMIUM_P2') -and $plan.ProvisioningStatus -eq 'Success') {
+                            $tieneP1 = $true
+                            break
+                        }
                     }
                 }
                 if ($tieneP1) { break }
             }
             if (-not $tieneP1) {
-                return [pscustomobject]@{
-                    Disponible = $false
-                    Motivo     = 'Requiere licencia Entra ID P1 (AAD_PREMIUM)'
-                }
+                return [pscustomobject]@{ Disponible = $false; Motivo = 'Requiere licencia Entra ID P1 (AAD_PREMIUM)' }
             }
             return [pscustomobject]@{ Disponible = $true; Motivo = $null }
         } catch {
-            # Si no se pueden consultar SKUs, no bloqueamos la capacidad.
-            # La creación fallará con un error de Graph si realmente no hay licencia.
             Write-LabWarn "No se pudieron consultar los SKUs del tenant: $($_.Exception.Message)"
             return [pscustomobject]@{ Disponible = $true; Motivo = $null }
         }
@@ -73,12 +74,14 @@ $Capacidad = @{
                 $errores += "Grupo dinámico #$i sin 'membershipRule'."
             } else {
                 if (-not ($g.membershipRule -match '^\s*\(')) {
-                    $errores += "Grupo dinámico #`${i}: 'membershipRule' debe empezar por '('."
+                    # CORREGIDO: sintaxis de variables
+                    $errores += "Grupo dinámico #${i}: 'membershipRule' debe empezar por '('."
                 }
             }
             if ($g.PSObject.Properties['processingState'] -and $g.processingState) {
                 if ($g.processingState -notin @('On','Paused')) {
-                    $errores += "Grupo dinámico #`${i}: 'processingState' inválido ('$($g.processingState)'). Debe ser 'On' o 'Paused'."
+                    # CORREGIDO: sintaxis de variables
+                    $errores += "Grupo dinámico #${i}: 'processingState' inválido ('$($g.processingState)'). Debe ser 'On' o 'Paused'."
                 }
             }
         }
@@ -98,9 +101,9 @@ $Capacidad = @{
 
         foreach ($g in @($Def)) {
             $displayName = $g.displayName
-            $description = if ($g.PSObject.Properties['description']) { $g.description } else { '' }
+            $description = if ($g.PSObject.Properties['description'] -and $null -ne $g.description) { $g.description } else { '' }
             $membershipRule = $g.membershipRule
-            $processingState = if ($g.PSObject.Properties['processingState'] -and $g.processingState) {
+            $processingState = if ($g.PSObject.Properties['processingState'] -and -not [string]::IsNullOrWhiteSpace($g.processingState)) {
                 $g.processingState
             } else {
                 'On'
@@ -121,7 +124,9 @@ $Capacidad = @{
             }
 
             # --- 2. ¿Existe ya? ---
-            $existing = Get-MgGroup -Filter "displayName eq '$displayName'" -ErrorAction SilentlyContinue
+            # N14: escapado OData
+            $displayNameEscapado = $displayName -replace "'","''"
+            $existing = Get-MgGroup -Filter "displayName eq '$displayNameEscapado'" -ErrorAction SilentlyContinue
             if ($existing) {
                 if ($existing -is [array]) { $existing = $existing[0] }
                 Write-Verbose "   -> Grupo dinámico existe: $displayName (reutilizado)"
@@ -143,11 +148,7 @@ $Capacidad = @{
                 try {
                     $grupo = New-MgGroup @params -ErrorAction Stop
                 } catch {
-                    if ($_.Exception.Message -match 'license|Premium|P1|P2') {
-                        Write-LabWarn "No se pudo crear el grupo dinámico '$displayName': requiere licencia P1/P2. $($_.Exception.Message)"
-                    } else {
-                        Write-LabWarn "No se pudo crear el grupo dinámico '$displayName': $($_.Exception.Message)"
-                    }
+                    Write-LabWarn "No se pudo crear el grupo dinámico '$displayName': $($_.Exception.Message)"
                     continue
                 }
 
@@ -188,7 +189,9 @@ $Capacidad = @{
                 $grupo = Get-MgGroup -GroupId $objectIdEsperado -ErrorAction SilentlyContinue
             }
             if (-not $grupo -and $displayName) {
-                $grupo = Get-MgGroup -Filter "displayName eq '$displayName'" -ErrorAction SilentlyContinue
+                # N14: escapado OData
+                $dnEscapado = $displayName -replace "'","''"
+                $grupo = Get-MgGroup -Filter "displayName eq '$dnEscapado'" -ErrorAction SilentlyContinue
             }
             if (-not $grupo) { return $true }
             if ($grupo -is [array]) { $grupo = $grupo[0] }
@@ -252,4 +255,4 @@ $Capacidad = @{
     }
 }
 
-Register-LabCapacidad -Capacidad $Capacidad
+$null = Register-LabCapacidad -Capacidad $Capacidad

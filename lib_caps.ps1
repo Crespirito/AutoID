@@ -1,44 +1,16 @@
 <#
 .SYNOPSIS
-    Librería de carga, registro y validación de capacidades.
+    Librería de carga y registro de capacidades para PowerShell 7.
 .DESCRIPTION
-    Proporciona:
-      - El registro en memoria de capacidades.
-      - El loader que recorre lib_caps/free|p1|p2/ y registra cada cap_*.ps1.
-      - La validación del contrato de capacidad al registrar.
-      - Utilidades para consultar capacidades por nombre, nivel o sección.
-
-    CONTRATO DE CAPACIDAD (campos obligatorios):
-      Nombre, SeccionJson, DependeDe, PermisosApp,
-      TestDisponible, ValidarDef, Describir, Crear, Revertir, PreguntarUI
-
-    CAMPOS OPCIONALES:
-      Nivel         - si no se declara, se hereda de la carpeta
-      Descripcion   - texto para el menú manual
-      Alias         - nombres alternativos de SeccionJson
-      ObtenerClaves - scriptblock que recibe $Def y devuelve los
-                      identificadores que la capacidad va a tocar
-                      (UPN, displayName, etc.). Se usa para construir
-                      el snapshot pre-lab y proteger objetos preexistentes.
-      PostCrear     - acción tras crear
-      PreRevertir   - acción antes de revertir
-
-    SEGURIDAD DE PREEXISTENTES:
-    Si una capacidad implementa ObtenerClaves, lib_creadores.ps1 puede
-    construir un snapshot pre-lab específico para esa capacidad. Si no
-    lo implementa, el orquestador no puede protegerla contra objetos
-    preexistentes; la capacidad debe hacerlo por su cuenta consultando
-    $Contexto.SnapshotPreLab.
-
-    Carpetas por nivel:
-      lib_caps/free/  -> capacidades Free
-      lib_caps/p1/    -> capacidades P1
-      lib_caps/p2/    -> capacidades P2
-    Renombrar una carpeta a *.disabled desactiva ese nivel.
+    Proporciona el registro en memoria y el loader de lib_caps/.
+    BLINDADO: rechaza cualquier objeto que no sea un Hashtable.
 .NOTES
-    Depende de lib_ui.ps1 y lib_niveles.ps1.
-    Se carga por dot-sourcing desde menu.ps1.
+    Depende de lib_ui.ps1.
+    Requiere PowerShell 7.
 #>
+#Requires -Version 7.0
+
+# Set-StrictMode -Version Latest
 
 # ============================================================
 # REGISTRO EN MEMORIA
@@ -47,281 +19,172 @@ if (-not (Get-Variable -Name 'LabCapacidades' -Scope Script -ErrorAction Silentl
     $script:LabCapacidades = @{}
 }
 
-# Campos obligatorios del contrato de capacidad
-$script:LabCapacidadCamposObligatorios = @(
-    'Nombre',
-    'SeccionJson',
-    'DependeDe',
-    'PermisosApp',
-    'TestDisponible',
-    'ValidarDef',
-    'Describir',
-    'Crear',
-    'Revertir',
-    'PreguntarUI'
-)
-
-# Campos opcionales que, si existen, deben ser scriptblock
-$script:LabCapacidadCamposOpcionalesScriptblock = @(
-    'ObtenerClaves',
-    'PostCrear',
-    'PreRevertir'
-)
-
 # ============================================================
-# FUNCIONES PÚBLICAS: REGISTRO
+# FUNCIONES PÚBLICAS: REGISTRO Y CONSULTA
 # ============================================================
 
 function Clear-LabCapacidades {
-    <#
-    .SYNOPSIS
-        Vacía el registro de capacidades. Útil para tests o recargas.
-    #>
     $script:LabCapacidades = @{}
 }
 
 function Register-LabCapacidad {
-    <#
-    .SYNOPSIS
-        Registra una capacidad tras validar el contrato.
-    .DESCRIPTION
-        Valida campos obligatorios, scriptblocks, nombre único, sección
-        única, dependencias existentes y sin ciclos, y nivel permitido.
-        Los campos opcionales (ObtenerClaves, PostCrear, PreRevertir) se
-        validan como scriptblocks si están presentes.
-    .PARAMETER Capacidad
-        Hashtable con los campos del contrato de capacidad.
-    .PARAMETER NivelCarpeta
-        Nivel heredado de la carpeta ('Free', 'P1', 'P2').
-    .OUTPUTS
-        $true si se registró, $false si falló la validación.
-    #>
     param(
         [Parameter(Mandatory = $true)]
-        [hashtable]$Capacidad,
+        $Capacidad,
 
         [string]$NivelCarpeta = 'Free'
     )
 
-    # 1. Campos obligatorios
-    foreach ($campo in $script:LabCapacidadCamposObligatorios) {
-        if (-not $Capacidad.ContainsKey($campo)) {
-            Write-LabWarn "Capacidad rechazada: falta el campo obligatorio '$campo'."
-            return $false
-        }
-    }
-
-    $nombre = $Capacidad.Nombre
-    if ([string]::IsNullOrWhiteSpace($nombre)) {
-        Write-LabWarn 'Capacidad rechazada: Nombre vacío.'
+    # BLINDAJE 1: Debe ser un Hashtable
+    if ($Capacidad -isnot [hashtable]) {
+        Write-LabWarn "Capacidad rechazada: el objeto no es un Hashtable. Tipo recibido: $(if ($null -eq $Capacidad) { 'null' } else { $Capacidad.GetType().Name })"
         return $false
     }
 
-    # 2. Scriptblocks obligatorios
-    foreach ($campo in @('TestDisponible','ValidarDef','Describir','Crear','Revertir','PreguntarUI')) {
-        if ($Capacidad[$campo] -isnot [scriptblock]) {
-            Write-LabWarn "Capacidad '$nombre' rechazada: '$campo' no es un scriptblock."
-            return $false
-        }
+    if (-not $Capacidad.ContainsKey('Nombre') -or [string]::IsNullOrWhiteSpace($Capacidad.Nombre)) {
+        Write-LabWarn "Capacidad rechazada: falta el campo obligatorio 'Nombre'."
+        return $false
     }
 
-    # 3. Scriptblocks opcionales (si están, deben ser scriptblock)
-    foreach ($campo in $script:LabCapacidadCamposOpcionalesScriptblock) {
-        if ($Capacidad.ContainsKey($campo) -and $null -ne $Capacidad[$campo]) {
-            if ($Capacidad[$campo] -isnot [scriptblock]) {
-                Write-LabWarn "Capacidad '$nombre' rechazada: '$campo' no es un scriptblock."
-                return $false
-            }
-        }
+    if (-not $Capacidad.ContainsKey('Descripcion') -or [string]::IsNullOrWhiteSpace($Capacidad.Descripcion)) {
+        Write-LabWarn "Capacidad '$($Capacidad.Nombre)' rechazada: falta el campo obligatorio 'Descripcion'."
+        return $false
     }
 
-    # 4. Nombre duplicado
+    $nombre = $Capacidad.Nombre
+
     if ($script:LabCapacidades.ContainsKey($nombre)) {
         Write-LabWarn "Capacidad '$nombre' rechazada: ya existe una capacidad con ese nombre."
         return $false
     }
 
-    # 5. SeccionJson duplicada (si no es $null)
-    if (-not [string]::IsNullOrWhiteSpace($Capacidad.SeccionJson)) {
-        foreach ($existente in $script:LabCapacidades.Values) {
-            if ($existente.SeccionJson -eq $Capacidad.SeccionJson) {
-                Write-LabWarn "Capacidad '$nombre' rechazada: la sección '$($Capacidad.SeccionJson)' ya la reclama '$($existente.Nombre)'."
-                return $false
-            }
-        }
-    }
-
-    # 6. Nivel: si no lo declara, hereda de la carpeta
     if (-not $Capacidad.ContainsKey('Nivel') -or [string]::IsNullOrWhiteSpace($Capacidad.Nivel)) {
         $Capacidad['Nivel'] = $NivelCarpeta
     }
 
-    # 7. Dependencias: existen y son de nivel igual o inferior
-    $ordenCap = Get-LabNivelOrden -Nivel $Capacidad.Nivel
-    foreach ($dep in @($Capacidad.DependeDe)) {
-        if ([string]::IsNullOrWhiteSpace($dep)) { continue }
-        if (-not $script:LabCapacidades.ContainsKey($dep)) {
-            Write-LabWarn "Capacidad '$nombre' rechazada: depende de '$dep', que no está registrada."
-            return $false
-        }
-        $ordenDep = Get-LabNivelOrden -Nivel $script:LabCapacidades[$dep].Nivel
-        if ($ordenDep -gt $ordenCap) {
-            Write-LabWarn "Capacidad '$nombre' rechazada: depende de '$dep' (nivel superior). Las dependencias solo pueden ser de nivel igual o inferior."
-            return $false
-        }
-    }
-
-    # 8. Ciclos
-    if (Test-LabCicloDependencias -Nombre $nombre -Capacidad $Capacidad -Visitados @()) {
-        Write-LabWarn "Capacidad '$nombre' rechazada: ciclo en DependeDe."
-        return $false
-    }
-
-    # 9. Registrar
     $script:LabCapacidades[$nombre] = $Capacidad
     return $true
 }
 
-function Test-LabCicloDependencias {
-    <#
-    .SYNOPSIS
-        Detecta ciclos en DependeDe de forma recursiva.
-    .OUTPUTS
-        $true si hay ciclo, $false si no.
-    #>
-    param(
-        [Parameter(Mandatory = $true)]
-        [string]$Nombre,
-
-        [Parameter(Mandatory = $true)]
-        [hashtable]$Capacidad,
-
-        [array]$Visitados = @()
-    )
-
-    if ($Visitados -contains $Nombre) { return $true }
-    $Visitados += $Nombre
-
-    foreach ($dep in @($Capacidad.DependeDe)) {
-        if ([string]::IsNullOrWhiteSpace($dep)) { continue }
-        if (-not $script:LabCapacidades.ContainsKey($dep)) { continue }
-        if (Test-LabCicloDependencias -Nombre $dep -Capacidad $script:LabCapacidades[$dep] -Visitados $Visitados) {
-            return $true
-        }
-    }
-    return $false
-}
-
-# ============================================================
-# FUNCIONES PÚBLICAS: CONSULTA
-# ============================================================
-
 function Get-LabCapacidades {
-    <#
-    .SYNOPSIS
-        Devuelve todas las capacidades registradas.
-    .PARAMETER Nivel
-        Si se especifica, filtra por nivel permitido.
-    .PARAMETER SoloDisponibles
-        Si se especifica, filtra por TestDisponible = $true.
-    .PARAMETER Contexto
-        Contexto para TestDisponible. Obligatorio si SoloDisponibles.
-    .OUTPUTS
-        Array de hashtables de capacidad, ordenado por Nombre.
-    #>
     param(
         [string]$Nivel = $null,
         [switch]$SoloDisponibles,
-        [hashtable]$Contexto = $null
+        [hashtable]$Contexto = @{}
     )
 
-    $resultado = @($script:LabCapacidades.Values)
+    # BLINDAJE 2: Solo devolver Hashtables válidos
+    $resultado = @($script:LabCapacidades.Values | Where-Object { $_ -is [hashtable] -and $_.ContainsKey('Nombre') })
 
     if ($Nivel) {
-        $resultado = @($resultado | Where-Object { Test-LabNivelPermitido -NivelCapacidad $_.Nivel -NivelConfigurado $Nivel })
+        if (-not (Test-Path variable:script:LabNiveles)) {
+            Write-LabWarn "Get-LabCapacidades -Nivel: lib_niveles.ps1 no está cargada. Devuelvo @()."
+            return @()
+        }
+        $resultado = @($resultado | Where-Object {
+            Test-LabNivelPermitido -NivelCapacidad $_.Nivel -NivelConfigurado $Nivel
+        })
     }
 
-    if ($SoloDisponibles -and $Contexto) {
-        $resultado = @($resultado | Where-Object {
-            $t = & $_.TestDisponible $Contexto
-            return ($t.Disponible -eq $true)
-        })
+    if ($SoloDisponibles) {
+        $filtradas = @()
+        foreach ($cap in $resultado) {
+            try {
+                if ($cap.ContainsKey('TestDisponible') -and $cap.TestDisponible -is [scriptblock]) {
+                    $t = & $cap.TestDisponible $Contexto
+                    if ($t -and $t.PSObject.Properties['Disponible'] -and $t.Disponible) {
+                        $filtradas += $cap
+                    }
+                } else {
+                    $filtradas += $cap
+                }
+            } catch {
+                Write-LabWarn "TestDisponible de '$($cap.Nombre)' falló: $($_.Exception.Message). Se descarta."
+            }
+        }
+        $resultado = $filtradas
     }
 
     return @($resultado | Sort-Object { $_.Nombre })
 }
 
-function Get-LabCapacidad {
+function Get-LabCapacidadPorSeccion {
     <#
     .SYNOPSIS
-        Devuelve una capacidad por nombre, o $null si no existe.
+        Devuelve la capacidad registrada para una clave de sección del JSON.
+    .DESCRIPTION
+        Acepta indistintamente:
+          - el nombre interno de la capacidad ('Usuarios')
+          - la clave del JSON (SeccionJson: 'usuarios')
+          - cualquier alias declarado en la capacidad ('apps', 'guests'...)
+        La comparación no distingue mayúsculas/minúsculas.
+        Devuelve $null si ninguna capacidad coincide.
     #>
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$NombreSeccion
+    )
+
+    if ([string]::IsNullOrWhiteSpace($NombreSeccion)) { return $null }
+    if ($null -eq $script:LabCapacidades) { return $null }
+
+    foreach ($cap in @($script:LabCapacidades.Values)) {
+        if ($cap -isnot [hashtable] -or -not $cap.ContainsKey('Nombre')) { continue }
+
+        if ([string]::Equals([string]$cap.Nombre, $NombreSeccion, [StringComparison]::OrdinalIgnoreCase)) {
+            return $cap
+        }
+
+        if ($cap.ContainsKey('SeccionJson') -and
+            -not [string]::IsNullOrWhiteSpace([string]$cap.SeccionJson) -and
+            [string]::Equals([string]$cap.SeccionJson, $NombreSeccion, [StringComparison]::OrdinalIgnoreCase)) {
+            return $cap
+        }
+
+        if ($cap.ContainsKey('Alias') -and $null -ne $cap.Alias) {
+            foreach ($a in @($cap.Alias)) {
+                if ([string]::IsNullOrWhiteSpace([string]$a)) { continue }
+                if ([string]::Equals([string]$a, $NombreSeccion, [StringComparison]::OrdinalIgnoreCase)) {
+                    return $cap
+                }
+            }
+        }
+    }
+
+    return $null
+}
+
+function Get-LabCapacidad {
     param(
         [Parameter(Mandatory = $true)]
         [string]$Nombre
     )
     if ($script:LabCapacidades.ContainsKey($Nombre)) {
-        return $script:LabCapacidades[$Nombre]
-    }
-    return $null
-}
-
-function Get-LabCapacidadPorSeccion {
-    <#
-    .SYNOPSIS
-        Devuelve la capacidad que reclama una sección JSON, o $null.
-    #>
-    param(
-        [Parameter(Mandatory = $true)]
-        [string]$Seccion
-    )
-    foreach ($cap in $script:LabCapacidades.Values) {
-        if ($cap.SeccionJson -eq $Seccion) { return $cap }
-        if ($cap.ContainsKey('Alias') -and ($cap.Alias -contains $Seccion)) { return $cap }
+        $cap = $script:LabCapacidades[$Nombre]
+        if ($cap -is [hashtable]) { return $cap }
     }
     return $null
 }
 
 function Test-LabCapacidadRegistrada {
-    <#
-    .SYNOPSIS
-        Devuelve $true si la capacidad está registrada.
-    #>
     param(
         [Parameter(Mandatory = $true)]
         [string]$Nombre
     )
-    return $script:LabCapacidades.ContainsKey($Nombre)
+    if (-not $script:LabCapacidades.ContainsKey($Nombre)) { return $false }
+    return ($script:LabCapacidades[$Nombre] -is [hashtable])
 }
 
 function Get-LabCapacidadClaves {
-    <#
-    .SYNOPSIS
-        Devuelve las claves que una capacidad va a tocar para una definición.
-    .DESCRIPTION
-        Si la capacidad implementa ObtenerClaves, lo llama con la definición
-        y devuelve el array de claves. Si no, devuelve @().
-        Lo usa lib_creadores.ps1 para construir el snapshot pre-lab por
-        capacidad si se necesita.
-    .PARAMETER Capacidad
-        Hashtable de la capacidad.
-    .PARAMETER Definicion
-        Sección del escenario normalizado para esa capacidad.
-    .OUTPUTS
-        Array de claves (strings).
-    #>
     param(
         [Parameter(Mandatory = $true)]
-        [hashtable]$Capacidad,
+        $Capacidad,
 
         [Parameter(Mandatory = $true)]
         [object]$Definicion
     )
 
-    if (-not $Capacidad.ContainsKey('ObtenerClaves') -or $null -eq $Capacidad.ObtenerClaves) {
-        return @()
-    }
-    if ($Capacidad.ObtenerClaves -isnot [scriptblock]) {
+    if ($Capacidad -isnot [hashtable] -or -not $Capacidad.ContainsKey('ObtenerClaves')) {
         return @()
     }
 
@@ -339,23 +202,17 @@ function Get-LabCapacidadClaves {
 # ============================================================
 
 function Initialize-LabCapacidades {
-    <#
-    .SYNOPSIS
-        Carga y registra todas las capacidades de lib_caps/.
-    .PARAMETER Root
-        Ruta raíz de capacidades (por defecto, lib_caps/ junto a este script).
-    .PARAMETER Niveles
-        Niveles a cargar. Si se omite, carga todos los disponibles.
-    .OUTPUTS
-        Número de capacidades registradas.
-    #>
     param(
         [string]$Root = $null,
-        [array]$Niveles = $null
+        [switch]$Forzar
     )
 
     if (-not $Root) {
         $Root = Join-Path $PSScriptRoot 'lib_caps'
+    }
+
+    if (-not $Forzar -and $script:LabCapacidades.Count -gt 0) {
+        return [int]$script:LabCapacidades.Count
     }
 
     Clear-LabCapacidades
@@ -365,36 +222,41 @@ function Initialize-LabCapacidades {
         return 0
     }
 
-    if (-not $Niveles -or $Niveles.Count -eq 0) {
-        $Niveles = Get-LabNivelesDisponibles -RootCaps $Root
-    }
+    $archivos = @(Get-ChildItem -Path $Root -Filter 'cap_*.ps1' -File -Recurse -ErrorAction SilentlyContinue)
 
-    $total = 0
-    foreach ($nivel in $Niveles) {
-        $carpeta = Get-LabNivelCarpeta -Nivel $nivel
-        $rutaNivel = Join-Path $Root $carpeta
-        if (-not (Test-Path -Path $rutaNivel -PathType Container)) { continue }
+    # Se acumula en $script: porque 'return' dentro de un foreach solo sale del
+    # bucle, y porque las variables locales de la función no sobreviven al
+    # cuerpo del foreach cuando este contiene un '& { }'.
+    $script:LabTotalCargadas = 0
 
-        $archivos = Get-ChildItem -Path $rutaNivel -Filter 'cap_*.ps1' -File -ErrorAction SilentlyContinue
-        foreach ($archivo in $archivos) {
-            try {
-                . $archivo.FullName
+    foreach ($archivo in $archivos) {
+        $nivelCarpeta = if ($archivo.Directory.Name -match '^(free|p1|p2)$') { $archivo.Directory.Name } else { 'Free' }
 
-                if ($null -eq $Capacidad) {
-                    Write-LabWarn "El archivo $($archivo.Name) no define `$Capacidad."
-                    continue
-                }
+        # Cada capacidad se evalúa en un scope de script hijo propio: $Capacidad
+        # queda privada de ese bloque y el Hashtable no se cuela en la salida
+        # de esta función (si se colara, falsearía el valor devuelto).
+        $cargada = & {
+            $Capacidad = $null
+            $null = . $archivo.FullName
+            if ($Capacidad -is [hashtable]) { return $Capacidad }
+            return $null
+        }
 
-                if (Register-LabCapacidad -Capacidad $Capacidad -NivelCarpeta $nivel) {
-                    $total++
-                }
-            } catch {
-                Write-LabWarn "Error cargando $($archivo.Name): $($_.Exception.Message)"
-            } finally {
-                Remove-Variable -Name 'Capacidad' -ErrorAction SilentlyContinue
-            }
+        if ($null -eq $cargada) {
+            Write-LabWarn "El archivo $($archivo.Name) no definió un Hashtable válido en `$Capacidad."
+            continue
+        }
+
+        # Cada cap_*.ps1 ya se registra a sí misma al final del archivo, así que
+        # aquí solo se comprueba que quedó registrada (no se vuelve a registrar).
+        if (-not $script:LabCapacidades.ContainsKey([string]$cargada.Nombre)) {
+            $null = Register-LabCapacidad -Capacidad $cargada -NivelCarpeta $nivelCarpeta
+        }
+
+        if ($script:LabCapacidades.ContainsKey([string]$cargada.Nombre)) {
+            $script:LabTotalCargadas = $script:LabTotalCargadas + 1
         }
     }
 
-    return $total
+    return [int]$script:LabTotalCargadas
 }

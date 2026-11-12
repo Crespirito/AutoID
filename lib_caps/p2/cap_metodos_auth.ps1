@@ -10,31 +10,36 @@
 
     LICENCIA:
     TAP requiere Microsoft Entra ID P1 (o superior) para cada usuario
-    que lo reciba. TestDisponible consulta los SKUs del tenant y comprueba
-    si existe el plan de servicio 'AAD_PREMIUM' o 'AAD_PREMIUM_P2' con
-    estado 'Success'. Si no existe, la capacidad no se ofrece.
+    que lo reciba. TestDisponible consulta los SKUs del tenant
+    (cacheada vía Get-LabSubscribedSku).
 
     SEGURIDAD:
     - El código TAP solo se devuelve en la creación y no se puede
-      recuperar después. Se muestra UNA SOLA VEZ al operador.
+      recuperar después. Se muestra UNA SOLA VEZ al operador, y SOLO
+      si Graph lo devuelve en la respuesta.
+    - Si isUsableOnce = $false, Graph NO devuelve el código. En ese caso
+      se avisa claramente al operador (no se finge que hay código).
     - Si el usuario es preexistente (snapshot pre-lab), no se le crea TAP.
-    - TAP solo funciona si el usuario no tiene ya un método de
-      autenticación sin contraseña fuerte (FIDO2, Windows Hello, etc.).
-      Si falla, se avisa y se omite.
+    - Si el usuario ya tiene un método de autenticación fuerte, Graph
+      fallará y se avisará.
 
     DEPENDENCIAS: Usuarios.
-
     NIVEL: P1.
+.NOTES
+    Requiere PowerShell 7.
 #>
+#Requires -Version 7.0
+
+# Set-StrictMode -Version Latest
 
 $Capacidad = @{
-    Nombre       = 'MetodosAuth'
-    Descripcion  = 'Métodos de autenticación (TAP)'
-    SeccionJson  = 'metodosAuth'
-    Alias        = @('metodosAuth','metodos_auth','authenticationMethods')
-    Nivel        = 'P1'
-    DependeDe    = @('Usuarios')
-    PermisosApp  = @('UserAuthenticationMethod.ReadWrite.All','User.Read.All')
+    Nombre      = 'MetodosAuth'
+    Descripcion = 'Métodos de autenticación (TAP)'
+    SeccionJson = 'metodosAuth'
+    Alias       = @('metodos_auth', 'authenticationMethods')
+    Nivel       = 'P1'
+    DependeDe   = @('Usuarios')
+    PermisosApp = @('UserAuthenticationMethod.ReadWrite.All','User.Read.All')
 
     TestDisponible = {
         param($Contexto)
@@ -42,23 +47,22 @@ $Capacidad = @{
             return [pscustomobject]@{ Disponible = $false; Motivo = 'Sin sesión de Graph' }
         }
         try {
-            $skus = Get-MgSubscribedSku -ErrorAction Stop
+            # N7: cache de SKUs
+            $skus = @(Get-LabSubscribedSku)
             $tieneP1 = $false
-            foreach ($sku in @($skus)) {
-                foreach ($plan in @($sku.ServicePlans)) {
-                    if ($plan.ServicePlanName -in @('AAD_PREMIUM','AAD_PREMIUM_P2') -and
-                        $plan.ProvisioningStatus -eq 'Success') {
-                        $tieneP1 = $true
-                        break
+            foreach ($sku in $skus) {
+                if ($sku.PSObject.Properties['ServicePlans'] -and $null -ne $sku.ServicePlans) {
+                    foreach ($plan in @($sku.ServicePlans)) {
+                        if ($plan.ServicePlanName -in @('AAD_PREMIUM','AAD_PREMIUM_P2') -and $plan.ProvisioningStatus -eq 'Success') {
+                            $tieneP1 = $true
+                            break
+                        }
                     }
                 }
                 if ($tieneP1) { break }
             }
             if (-not $tieneP1) {
-                return [pscustomobject]@{
-                    Disponible = $false
-                    Motivo     = 'Requiere licencia Entra ID P1 (AAD_PREMIUM)'
-                }
+                return [pscustomobject]@{ Disponible = $false; Motivo = 'Requiere licencia Entra ID P1 (AAD_PREMIUM)' }
             }
             return [pscustomobject]@{ Disponible = $true; Motivo = $null }
         } catch {
@@ -79,7 +83,8 @@ $Capacidad = @{
             if ($m.PSObject.Properties['lifetimeInMinutes'] -and $null -ne $m.lifetimeInMinutes) {
                 $lt = [int]$m.lifetimeInMinutes
                 if ($lt -lt 10 -or $lt -gt 43200) {
-                    $errores += "Método #`${i}: 'lifetimeInMinutes' debe estar entre 10 y 43200."
+                    # CORREGIDO: sintaxis de variables
+                    $errores += "Método #${i}: 'lifetimeInMinutes' debe estar entre 10 y 43200."
                 }
             }
         }
@@ -99,17 +104,19 @@ $Capacidad = @{
 
         foreach ($m in @($Def)) {
             $upn = $m.usuario -replace '\{tenant\}', $Contexto.TenantDomain
+
             $lifetime = if ($m.PSObject.Properties['lifetimeInMinutes'] -and $null -ne $m.lifetimeInMinutes) {
                 [int]$m.lifetimeInMinutes
             } else {
                 60
             }
-            $isUsableOnce = if ($m.PSObject.Properties['isUsableOnce'] -and $null -ne $m.isUsableOnce) {
-                [bool]$m.isUsableOnce
-            } else {
-                $true
+
+            $isUsableOnce = $true
+            if ($m.PSObject.Properties['isUsableOnce'] -and $null -ne $m.isUsableOnce) {
+                $isUsableOnce = [bool]$m.isUsableOnce
             }
-            $startDateTime = if ($m.PSObject.Properties['startDateTime'] -and $m.startDateTime) {
+
+            $startDateTime = if ($m.PSObject.Properties['startDateTime'] -and -not [string]::IsNullOrWhiteSpace($m.startDateTime)) {
                 $m.startDateTime
             } else {
                 (Get-Date).ToString('o')
@@ -146,11 +153,7 @@ $Capacidad = @{
             try {
                 $resultado = New-MgUserAuthenticationTemporaryAccessPassMethod -UserId $user.Id -BodyParameter $body -ErrorAction Stop
             } catch {
-                if ($_.Exception.Message -match 'already|method|strong') {
-                    Write-LabWarn "No se pudo crear TAP para '$upn': el usuario ya tiene un método de autenticación fuerte. $($_.Exception.Message)"
-                } else {
-                    Write-LabWarn "No se pudo crear TAP para '$upn': $($_.Exception.Message)"
-                }
+                Write-LabWarn "No se pudo crear TAP para '$upn': $($_.Exception.Message)"
                 continue
             }
 
@@ -158,22 +161,37 @@ $Capacidad = @{
                 Write-LabWarn "New-MgUserAuthenticationTemporaryAccessPassMethod no devolvió objeto para '$upn'."
                 continue
             }
+            if ($resultado -is [array]) { $resultado = $resultado[0] }
 
-            # El código TAP solo se devuelve aquí. No se guarda en el manifiesto.
-            $tapCode = $resultado.TemporaryAccessPass
+            # --- 4. N16: TAP code puede no venir ---
+            $tapCode = $null
+            if ($resultado.PSObject.Properties['TemporaryAccessPass'] -and -not [string]::IsNullOrWhiteSpace([string]$resultado.TemporaryAccessPass)) {
+                $tapCode = [string]$resultado.TemporaryAccessPass
+            }
 
-            Write-Verbose "   -> TAP creado para '$upn'"
+            Write-Verbose "   -> TAP creado para '$upn' (methodId: $($resultado.Id))"
 
-            # Mostrar el código TAP UNA SOLA VEZ
-            Write-Host ''
-            Write-Host '=== TEMPORARY ACCESS PASS CREADO (MOSTRAR UNA SOLA VEZ) ===' -ForegroundColor Yellow
-            Write-Host "  Usuario : $upn"
-            Write-Host "  Código  : $tapCode" -ForegroundColor Green
-            Write-Host "  Expira  : $((Get-Date).AddMinutes($lifetime).ToString('yyyy-MM-dd HH:mm'))"
-            Write-Host "  Un solo uso: $isUsableOnce"
-            Write-Host ''
-            Write-Host 'Si pierdes el código, tendrás que crear un TAP nuevo.' -ForegroundColor Yellow
-            Write-Host ''
+            if (-not [string]::IsNullOrWhiteSpace($tapCode)) {
+                Write-Host ''
+                Write-Host '=== TEMPORARY ACCESS PASS CREADO (MOSTRAR UNA SOLA VEZ) ===' -ForegroundColor Yellow
+                Write-Host "  Usuario : $upn"
+                Write-Host "  Código  : $tapCode" -ForegroundColor Green
+                Write-Host "  Expira  : $((Get-Date).AddMinutes($lifetime).ToString('yyyy-MM-dd HH:mm'))"
+                Write-Host "  Un solo uso: $isUsableOnce"
+                Write-Host ''
+                Write-Host 'Si pierdes el código, tendrás que crear un TAP nuevo.' -ForegroundColor Yellow
+                Write-Host ''
+            } else {
+                # N16: aviso claro cuando Graph no devuelve el código
+                Write-Host ''
+                Write-LabWarn "TAP creado para '$upn' pero Graph NO ha devuelto el código."
+                Write-LabInfo "Motivo habitual: isUsableOnce = `$false. Graph solo devuelve el código en la respuesta cuando el TAP es de un solo uso."
+                Write-LabInfo "Para obtener el código: consulta el usuario en el portal de Entra ID, o vuelve a crear el TAP con isUsableOnce = `$true."
+                Write-Host "  Usuario : $upn"
+                Write-Host "  Expira  : $((Get-Date).AddMinutes($lifetime).ToString('yyyy-MM-dd HH:mm'))"
+                Write-Host "  Un solo uso: $isUsableOnce"
+                Write-Host ''
+            }
 
             $creados += [pscustomobject]@{
                 tipo              = 'MetodoAuth'
@@ -181,6 +199,7 @@ $Capacidad = @{
                 userId            = $user.Id
                 methodId          = $resultado.Id
                 lifetimeInMinutes = $lifetime
+                isUsableOnce      = $isUsableOnce
                 estadoDetalle     = 'creado'
             }
         }
@@ -197,18 +216,16 @@ $Capacidad = @{
         $methodId = if ($Objeto.datos) { $Objeto.datos.methodId } else { $null }
 
         if (-not $userId -or -not $methodId) {
-            # Preexistente o sin datos: no hay nada que revertir
             return $true
         }
 
         try {
-            # Comprobar si el método existe
-            $metodo = Get-MgUserAuthenticationMethod -UserId $userId -ErrorAction SilentlyContinue
+            $metodos = Get-MgUserAuthenticationMethod -UserId $userId -ErrorAction SilentlyContinue
             $existe = $false
-            foreach ($m in @($metodo)) {
+            foreach ($m in @($metodos)) {
                 if ($m.Id -eq $methodId) { $existe = $true; break }
             }
-            if (-not $existe) { return $true }  # idempotente
+            if (-not $existe) { return $true }
 
             $null = Remove-MgUserAuthenticationMethod -UserId $userId -AuthenticationMethodId $methodId -Confirm:$false -ErrorAction Stop
             return $true
@@ -253,4 +270,4 @@ $Capacidad = @{
     }
 }
 
-Register-LabCapacidad -Capacidad $Capacidad
+$null = Register-LabCapacidad -Capacidad $Capacidad

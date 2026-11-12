@@ -6,45 +6,28 @@
     todos los objetos creados y las vulnerabilidades aplicadas.
 
     Orden de borrado (gestionado por Invoke-LabReversion):
-      1. Vulnerabilidades aplicadas (owners, credenciales, roles PIM).
-         - Verifica objectId del objeto afectado.
-         - Llama a PreRevertir de la capacidad si existe.
+      1. Vulnerabilidades aplicadas.
       2. Objetos en orden inverso de creación (LIFO).
-      3. Cada objeto/vulnerabilidad se revierte llamando a la capacidad
-         que lo creó/aplicó.
 
     SEGURIDAD:
-    - Antes de borrar cada objeto, se verifica que el objectId del
-      manifiesto coincide con el actual. Si no coincide (objeto borrado
-      y recreado externamente), se omite y se avisa.
-    - Los objetos con estado 'preexistente' se ignoran. Eran anteriores
-      al laboratorio y no se tocan.
-    - Si una capacidad no está registrada (carpeta desactivada), el
-      objeto/vulnerabilidad se deja en el manifiesto con estado
-      'no-revertido'/'no-revertida' y se avisa.
+    - Verifica el objectId del manifiesto con el actual antes de borrar.
+    - Ignora objetos con estado 'preexistente'.
+    - Avisa si una capacidad no está registrada y no borra a ciegas.
 
     SOFT-DELETE:
-    Remove-MgUser, Remove-MgGroup, Remove-MgApplication y
-    Remove-MgServicePrincipal hacen soft-delete. Los objetos se pueden
-    restaurar durante 30 dias desde el portal de Entra ID o con
-    Restore-MgDirectoryDeletedItem.
-    Nota: restaurar una aplicacion no restaura automaticamente su
-    service principal; hay que restaurarlos por separado.
+    Los objetos se pueden restaurar durante 30 días desde el portal de Entra ID.
 
-    La sesion de Graph la gestiona menu.ps1. Este script NO conecta ni
-    desconecta; solo verifica que hay sesion activa.
+    La sesión de Graph la gestiona menu.ps1. Este script NO conecta ni
+    desconecta; solo verifica que hay sesión activa.
 .PARAMETER ManifiestoPath
-    Ruta del manifiesto a procesar. Si se omite, se usa el estandar.
+    Ruta del manifiesto a procesar. Si se omite, se usa el estándar.
 .PARAMETER Forzar
-    Si se especifica, para objetos cuya capacidad no esta registrada,
-    intenta un borrado generico por tipo. No se recomienda: puede borrar
-    objetos que no son del laboratorio si el objectId no coincide.
+    Si se especifica, para objetos cuya capacidad no está registrada,
+    intenta un borrado genérico por tipo.
 .NOTES
-    Depende de lib_ui.ps1, lib_graph.ps1, lib_config.ps1,
-    lib_manifiesto.ps1, lib_escenarios.ps1, lib_niveles.ps1,
-    lib_caps.ps1, lib_creadores.ps1.
+    Requiere PowerShell 7.
 #>
-#Requires -Version 5.1
+#Requires -Version 7.0
 
 [CmdletBinding()]
 param(
@@ -55,7 +38,7 @@ param(
     [switch]$Forzar
 )
 
-Set-StrictMode -Version Latest
+# Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
 # ============================================================
@@ -71,17 +54,16 @@ $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'lib_creadores.ps1')
 
 # ============================================================
-# VERIFICACIÓN DE SESIÓN
+# VERIFICACIÓN DE SESIÓN Y CAPACIDADES
 # ============================================================
 if (-not (Test-LabGraphSession)) {
     Write-LabError 'No hay sesión de Graph activa. Ejecuta este script desde menu.ps1.'
     exit 1
 }
 
-# ============================================================
-# CONFIGURACIÓN Y CAPACIDADES
-# ============================================================
 $config = Get-LabConfig
+
+# Evitar doble carga si venimos desde menu.ps1
 if ((Get-LabCapacidades).Count -eq 0) {
     $null = Initialize-LabCapacidades -Root (Join-Path $PSScriptRoot 'lib_caps')
 }
@@ -116,6 +98,17 @@ if ($null -eq $manifiesto) {
     exit 1
 }
 
+# Validación defensiva: objetos y vulnerabilidades deben ser arrays
+# (Get-LabManifiesto ya los normaliza, pero reforzamos)
+if ($null -eq $manifiesto.objetos -or $manifiesto.objetos -isnot [array]) {
+    Write-LabWarn 'Manifiesto sin lista de objetos válida. Se asume lista vacía.'
+    $manifiesto.objetos = @()
+}
+if ($null -eq $manifiesto.vulnerabilidades -or $manifiesto.vulnerabilidades -isnot [array]) {
+    Write-LabWarn 'Manifiesto sin lista de vulnerabilidades válida. Se asume lista vacía.'
+    $manifiesto.vulnerabilidades = @()
+}
+
 # ============================================================
 # RESUMEN Y CONFIRMACIÓN
 # ============================================================
@@ -126,47 +119,16 @@ Write-Host '--- Contenido del manifiesto ---' -ForegroundColor Yellow
 Write-Host "  Versión           : $($manifiesto.manifestVersion)"
 Write-Host "  Fecha             : $($manifiesto.fecha)"
 Write-Host "  Tenant            : $($manifiesto.tenantDomain)"
-Write-Host "  Nivel             : $($manifiesto.nivel)"
 Write-Host "  Escenario         : $($manifiesto.escenario)"
 Write-Host "  Objetos totales   : $($manifiesto.objetos.Count)"
 Write-Host "  Vulnerabilidades  : $($manifiesto.vulnerabilidades.Count)"
 Write-Host ''
-Write-Host "  Objetos pendientes        : $($pendientes.objetos.Count)" -ForegroundColor Yellow
+Write-Host "  Objetos pendientes         : $($pendientes.objetos.Count)" -ForegroundColor Yellow
 Write-Host "  Vulnerabilidades pendientes: $($pendientes.vulnerabilidades.Count)" -ForegroundColor Yellow
 Write-Host ''
 
-# Desglose por capacidad (objetos)
-$objetosPorCapacidad = @{}
-foreach ($o in $pendientes.objetos) {
-    $cap = if ($o.capacidad) { $o.capacidad } else { 'Desconocida' }
-    if (-not $objetosPorCapacidad.ContainsKey($cap)) { $objetosPorCapacidad[$cap] = 0 }
-    $objetosPorCapacidad[$cap]++
-}
-if ($objetosPorCapacidad.Count -gt 0) {
-    Write-Host '  Objetos pendientes por capacidad:' -ForegroundColor Cyan
-    foreach ($cap in ($objetosPorCapacidad.Keys | Sort-Object)) {
-        Write-Host "    $cap : $($objetosPorCapacidad[$cap])"
-    }
-    Write-Host ''
-}
-
-# Desglose por capacidad (vulnerabilidades)
-$vulnsPorCapacidad = @{}
-foreach ($v in $pendientes.vulnerabilidades) {
-    $cap = if ($v.capacidad) { $v.capacidad } else { 'Desconocida' }
-    if (-not $vulnsPorCapacidad.ContainsKey($cap)) { $vulnsPorCapacidad[$cap] = 0 }
-    $vulnsPorCapacidad[$cap]++
-}
-if ($vulnsPorCapacidad.Count -gt 0) {
-    Write-Host '  Vulnerabilidades pendientes por capacidad:' -ForegroundColor Cyan
-    foreach ($cap in ($vulnsPorCapacidad.Keys | Sort-Object)) {
-        Write-Host "    $cap : $($vulnsPorCapacidad[$cap])"
-    }
-    Write-Host ''
-}
-
 if ($pendientes.objetos.Count -eq 0 -and $pendientes.vulnerabilidades.Count -eq 0) {
-    Write-LabOk 'No hay objetos ni vulnerabilidades pendientes de revertir en el manifiesto.'
+    Write-LabOk 'No hay objetos ni vulnerabilidades pendientes de revertir.'
     exit 0
 }
 
@@ -197,6 +159,8 @@ Write-Host "  Revertidos     : $($resultado.Revertidos)" -ForegroundColor Green
 Write-Host "  Fallidos       : $($resultado.Fallidos)" -ForegroundColor Red
 Write-Host "  Omitidos       : $($resultado.Omitidos)" -ForegroundColor Yellow
 Write-Host "  Preexistentes  : $($resultado.Preexistentes)" -ForegroundColor DarkGray
+Write-Host "  Total objetos  : $($manifiesto.objetos.Count)" -ForegroundColor Gray
+Write-Host "  Total vulns    : $($manifiesto.vulnerabilidades.Count)" -ForegroundColor Gray
 Write-Host ''
 
 # ============================================================
@@ -209,52 +173,85 @@ if (Save-LabManifiesto -Manifiesto $manifiesto -Path $ManifiestoPath) {
 }
 
 # ============================================================
-# RENOMBRAR SI TODO SE REVIRTIÓ
+# RENOMBRAR SI TODO SE REVIRTIÓ (N12: pasar -Path)
 # ============================================================
 $quedanPendientes = Get-LabManifiestoPendientes -Manifiesto $manifiesto
 if ($quedanPendientes.objetos.Count -eq 0 -and $quedanPendientes.vulnerabilidades.Count -eq 0) {
-    $manifiestoProcesado = Rename-LabManifiestoProcesado
+    $manifiestoProcesado = Rename-LabManifiestoProcesado -Path $ManifiestoPath
     if ($manifiestoProcesado) {
         Write-LabOk "Manifiesto renombrado como procesado: $manifiestoProcesado"
     }
 } else {
-    Write-LabWarn "Quedan $($quedanPendientes.objetos.Count) objetos y $($quedanPendientes.vulnerabilidades.Count) vulnerabilidades pendientes. El manifiesto se conserva para reintentar."
+    Write-LabWarn "Quedan $($quedanPendientes.objetos.Count) objetos y $($quedanPendientes.vulnerabilidades.Count) vulnerabilidades pendientes."
     Write-LabInfo 'Revisa los avisos anteriores y vuelve a ejecutar la limpieza.'
 }
 
 # ============================================================
 # VOLCADO DEL LOG
 # ============================================================
-$logPath = Join-Path $PSScriptRoot "log_cleanup_$(Get-Date -Format 'yyyyMMdd-HHmmss').csv"
+# N8-log: nombre con escenario para distinguir limpiezas
+$escenarioLog = if (-not [string]::IsNullOrWhiteSpace([string]$manifiesto.escenario)) {
+    ($manifiesto.escenario -replace '[^a-zA-Z0-9_-]', '_')
+} else {
+    ''
+}
+$sufijoLog = if ($escenarioLog) { "_$escenarioLog" } else { '' }
+$logPath = Join-Path $PSScriptRoot "log_cleanup$sufijoLog`_$(Get-Date -Format 'yyyyMMdd_HHmmss').csv"
 
 try {
     $resumen = @()
 
-    # Objetos
+    # N8-log: lectura segura de campos (PSObject.Properties)
     foreach ($o in $manifiesto.objetos) {
+        $id = ''
+        if ($o.PSObject.Properties['id'] -and $null -ne $o.id) { $id = [string]$o.id }
+
+        $tipo = ''
+        if ($o.PSObject.Properties['tipo'] -and $null -ne $o.tipo) { $tipo = [string]$o.tipo }
+
+        $capacidad = ''
+        if ($o.PSObject.Properties['capacidad'] -and $null -ne $o.capacidad) { $capacidad = [string]$o.capacidad }
+
+        $estado = ''
+        if ($o.PSObject.Properties['estado'] -and $null -ne $o.estado) { $estado = [string]$o.estado }
+
         $resumen += [pscustomobject]@{
             clase     = 'Objeto'
-            id        = $o.id
+            id        = $id
             nombre    = ''
-            tipo      = $o.tipo
-            capacidad = $o.capacidad
-            estado    = $o.estado
+            tipo      = $tipo
+            capacidad = $capacidad
+            estado    = $estado
         }
     }
 
-    # Vulnerabilidades
     foreach ($v in $manifiesto.vulnerabilidades) {
+        $id = ''
+        if ($v.PSObject.Properties['id'] -and $null -ne $v.id) { $id = [string]$v.id }
+
+        $nombre = ''
+        if ($v.PSObject.Properties['nombre'] -and $null -ne $v.nombre) { $nombre = [string]$v.nombre }
+
+        $tipo = ''
+        if ($v.PSObject.Properties['tipo'] -and $null -ne $v.tipo) { $tipo = [string]$v.tipo }
+
+        $capacidad = ''
+        if ($v.PSObject.Properties['capacidad'] -and $null -ne $v.capacidad) { $capacidad = [string]$v.capacidad }
+
+        $estado = ''
+        if ($v.PSObject.Properties['estado'] -and $null -ne $v.estado) { $estado = [string]$v.estado }
+
         $resumen += [pscustomobject]@{
             clase     = 'Vulnerabilidad'
-            id        = $v.id
-            nombre    = if ($v.nombre) { $v.nombre } else { '' }
-            tipo      = $v.tipo
-            capacidad = $v.capacidad
-            estado    = $v.estado
+            id        = $id
+            nombre    = $nombre
+            tipo      = $tipo
+            capacidad = $capacidad
+            estado    = $estado
         }
     }
 
-    if ($resumen.Count -gt 0) {
+    if (@($resumen).Count -gt 0) {
         $resumen | Export-Csv -Path $logPath -NoTypeInformation -Encoding UTF8
         Write-Host "Log completo: $logPath" -ForegroundColor Gray
     }

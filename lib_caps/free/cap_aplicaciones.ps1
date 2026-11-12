@@ -18,12 +18,18 @@
     - El SP sigue la misma lógica, comprobando por appId.
 
     NIVEL: Free.
+.NOTES
+    Requiere PowerShell 7.
 #>
+#Requires -Version 7.0
+
+# Set-StrictMode -Version Latest
 
 $Capacidad = @{
     Nombre      = 'Aplicaciones'
+    Descripcion = 'Aplicaciones y Service Principals'
     SeccionJson = 'aplicaciones'
-    Alias       = @('Aplicaciones','aplicaciones','apps')
+    Alias       = @('Aplicaciones', 'apps')
     Nivel       = 'Free'
     DependeDe   = @()
     PermisosApp = @('Application.ReadWrite.All','Directory.Read.All')
@@ -75,8 +81,8 @@ $Capacidad = @{
 
         foreach ($a in @($Def)) {
             $displayName = $a.displayName
-            $description = if ($a.PSObject.Properties['description']) { $a.description } else { '' }
-            $signInAudience = if ($a.PSObject.Properties['signInAudience'] -and $a.signInAudience) {
+            $description = if ($a.PSObject.Properties['description'] -and $null -ne $a.description) { $a.description } else { '' }
+            $signInAudience = if ($a.PSObject.Properties['signInAudience'] -and -not [string]::IsNullOrWhiteSpace($a.signInAudience)) {
                 $a.signInAudience
             } else {
                 'AzureADMyOrg'
@@ -86,6 +92,9 @@ $Capacidad = @{
             } else {
                 @()
             }
+
+            # N14: escapar comillas simples para filtros OData
+            $displayNameEscapado = $displayName -replace "'","''"
 
             # --- 1. Snapshot pre-lab ---
             if ($Contexto.SnapshotPreLab -and
@@ -103,32 +112,39 @@ $Capacidad = @{
             }
 
             # --- 2. ¿Existe ya en el tenant? ---
-            $existing = Get-MgApplication -Filter "displayName eq '$displayName'" -ErrorAction SilentlyContinue
-            if ($existing) {
-                if ($existing -is [array]) { $existing = $existing[0] }
-                Write-Verbose "   -> Aplicación existe: $displayName (reutilizada)"
-                $app = $existing
-                $estadoDetalle = 'reutilizado'
-            } else {
+            # N21: normalizar array vacío antes de acceder a [0]
+            $existing = Get-MgApplication -Filter "displayName eq '$displayNameEscapado'" -ErrorAction SilentlyContinue
+            $existingArr = @($existing)
+            if ($existingArr.Count -gt 0) {
+                $app = $existingArr[0]
+                if ($null -ne $app) {
+                    Write-Verbose "   -> Aplicación existe: $displayName (reutilizada)"
+                    $estadoDetalle = 'reutilizado'
+                } else {
+                    Write-LabWarn "Get-MgApplication devolvió un array con $($existingArr.Count) entradas pero la primera es `$null. Se ignora."
+                    $app = $null
+                }
+            }
+
+            if ($null -eq $app) {
                 $params = @{
                     DisplayName    = $displayName
                     SignInAudience = $signInAudience
-                    Description    = $description
                 }
-                if ($redirectUris.Count -gt 0) {
-                    $params.Web = @{ RedirectUris = $redirectUris }
-                }
+                if (-not [string]::IsNullOrWhiteSpace($description)) { $params.Description = $description }
+                if ($redirectUris.Count -gt 0) { $params.Web = @{ RedirectUris = $redirectUris } }
 
-                $app = New-MgApplication @params -ErrorAction Stop
-                if ($null -eq $app) { throw "New-MgApplication no devolvió objeto para $displayName" }
-                if ($app -is [array]) { $app = $app[0] }
+                $nueva = New-MgApplication @params -ErrorAction Stop
+                if ($null -eq $nueva) { throw "New-MgApplication no devolvió objeto para $displayName" }
+                $nuevaArr = @($nueva)
+                $app = $nuevaArr[0]
                 Write-Verbose "   -> Aplicación creada: $displayName"
                 $estadoDetalle = 'creado'
             }
 
             $appId = $app.AppId
             if ($appId -is [array]) { $appId = $appId[0] }
-            $appId = $appId.ToString()
+            $appId = [string]$appId
 
             $creados += [pscustomobject]@{
                 tipo          = 'Aplicacion'
@@ -139,15 +155,19 @@ $Capacidad = @{
             }
 
             # --- 3. Service Principal asociado ---
-            $existingSP = Get-MgServicePrincipal -Filter "appId eq '$appId'" -ErrorAction SilentlyContinue
-            if ($existingSP) {
-                if ($existingSP -is [array]) { $existingSP = $existingSP[0] }
+            # N14: escapar appId (aunque es GUID, mantenemos consistencia)
+            $appIdEscapado = $appId -replace "'","''"
+            $existingSP = Get-MgServicePrincipal -Filter "appId eq '$appIdEscapado'" -ErrorAction SilentlyContinue
+            $existingSPArr = @($existingSP)
+
+            if ($existingSPArr.Count -gt 0 -and $null -ne $existingSPArr[0]) {
+                $spExistente = $existingSPArr[0]
                 Write-Verbose "   -> Service Principal existe para $displayName"
                 $creados += [pscustomobject]@{
                     tipo          = 'ServicePrincipal'
                     displayName   = $displayName
                     appId         = $appId
-                    objectId      = $existingSP.Id
+                    objectId      = $spExistente.Id
                     estadoDetalle = 'reutilizado'
                 }
             } else {
@@ -157,13 +177,14 @@ $Capacidad = @{
                 }
                 $sp = New-MgServicePrincipal @spParams -ErrorAction Stop
                 if ($null -eq $sp) { throw "New-MgServicePrincipal no devolvió objeto para $displayName" }
-                if ($sp -is [array]) { $sp = $sp[0] }
+                $spArr = @($sp)
+                $spObj = $spArr[0]
                 Write-Verbose "   -> Service Principal creado para $displayName"
                 $creados += [pscustomobject]@{
                     tipo          = 'ServicePrincipal'
                     displayName   = $displayName
                     appId         = $appId
-                    objectId      = $sp.Id
+                    objectId      = $spObj.Id
                     estadoDetalle = 'creado'
                 }
             }
@@ -190,7 +211,10 @@ $Capacidad = @{
                     $sp = Get-MgServicePrincipal -ServicePrincipalId $objectIdEsperado -ErrorAction SilentlyContinue
                 }
                 if (-not $sp -and $appId) {
-                    $sp = Get-MgServicePrincipal -Filter "appId eq '$appId'" -ErrorAction SilentlyContinue
+                    # N14: escapar appId
+                    $appIdEscapado = $appId -replace "'","''"
+                    $spCandidatos = @(Get-MgServicePrincipal -Filter "appId eq '$appIdEscapado'" -ErrorAction SilentlyContinue)
+                    if ($spCandidatos.Count -gt 0 -and $null -ne $spCandidatos[0]) { $sp = $spCandidatos[0] }
                 }
                 if (-not $sp) { return $true }  # idempotente
                 if ($sp -is [array]) { $sp = $sp[0] }
@@ -200,11 +224,13 @@ $Capacidad = @{
                     return $false
                 }
 
-                # Quitar asignaciones antes de borrar
-                $asignaciones = Get-MgServicePrincipalAppRoleAssignedTo -ServicePrincipalId $sp.Id -All -ErrorAction SilentlyContinue
-                foreach ($asig in $asignaciones) {
-                    $null = Remove-MgServicePrincipalAppRoleAssignedTo -ServicePrincipalId $sp.Id -AppRoleAssignmentId $asig.Id -Confirm:$false -ErrorAction SilentlyContinue
-                }
+                # Quitar asignaciones antes de borrar (PS7 a veces requiere esto)
+                try {
+                    $asignaciones = Get-MgServicePrincipalAppRoleAssignedTo -ServicePrincipalId $sp.Id -All -ErrorAction SilentlyContinue
+                    foreach ($asig in @($asignaciones)) {
+                        $null = Remove-MgServicePrincipalAppRoleAssignedTo -ServicePrincipalId $sp.Id -AppRoleAssignmentId $asig.Id -Confirm:$false -ErrorAction SilentlyContinue
+                    }
+                } catch { }
 
                 $null = Remove-MgServicePrincipal -ServicePrincipalId $sp.Id -Confirm:$false -ErrorAction Stop
                 return $true
@@ -229,7 +255,10 @@ $Capacidad = @{
                     $app = Get-MgApplication -ApplicationId $objectIdEsperado -ErrorAction SilentlyContinue
                 }
                 if (-not $app -and $displayName) {
-                    $app = Get-MgApplication -Filter "displayName eq '$displayName'" -ErrorAction SilentlyContinue
+                    # N14: escapar displayName
+                    $dnEscapado = $displayName -replace "'","''"
+                    $appCandidatos = @(Get-MgApplication -Filter "displayName eq '$dnEscapado'" -ErrorAction SilentlyContinue)
+                    if ($appCandidatos.Count -gt 0 -and $null -ne $appCandidatos[0]) { $app = $appCandidatos[0] }
                 }
                 if (-not $app) { return $true }  # idempotente
                 if ($app -is [array]) { $app = $app[0] }
@@ -261,7 +290,6 @@ $Capacidad = @{
             return $null
         }
 
-        # Snapshot pre-lab
         if ($Contexto.SnapshotPreLab -and
             $Contexto.SnapshotPreLab.ContainsKey('aplicaciones') -and
             $Contexto.SnapshotPreLab.aplicaciones.ContainsKey($displayName)) {
@@ -299,4 +327,4 @@ $Capacidad = @{
     }
 }
 
-Register-LabCapacidad -Capacidad $Capacidad
+$null = Register-LabCapacidad -Capacidad $Capacidad

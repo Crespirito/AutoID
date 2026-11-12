@@ -4,113 +4,89 @@
 .DESCRIPTION
     Proporciona:
       - Ruta canónica del manifiesto (manifiesto_lab.json).
-      - Estructura v2.1: metadatos + lista plana de objetos + lista de
-        vulnerabilidades.
-      - Migración automática desde v1 (listas por tipo) y v2 (vulnerabilidades
-        dentro de objetos) al cargar.
-      - Normalización de campos (objetos y vulnerabilidades siempre arrays).
+      - Estructura v2.1: metadatos + lista de objetos + lista de vulnerabilidades.
+      - Normalización segura de arrays para PowerShell 7.
       - Estado resumido para el menú.
-      - Guardado y renombrado como procesado.
+      - Guardado y renombrado como procesado (con -Path opcional).
+      - Detección de manifestVersion antigua o futura.
 
-    Estructura v2.1:
-      {
-        "manifestVersion": "2.1",
-        "fecha": "...",
-        "tenantId": "...",
-        "tenantDomain": "...",
-        "nivel": "P1",
-        "escenario": "...",
-        "semilla": "...",
-        "objetos": [ { id, tipo, capacidad, estado, timestamp, tenantId, datos }, ... ],
-        "vulnerabilidades": [ { id, nombre, tipo, capacidad, estado, timestamp, datos }, ... ]
-      }
-
-    DIFERENCIAS CON v2:
-      - Las vulnerabilidades viven SIEMPRE en 'vulnerabilidades', nunca en
-        'objetos'. La migración v2 -> v2.1 mueve los objetos con
-        capacidad = 'Vulnerabilidades' al array correcto.
-      - 'capacidad' de una vulnerabilidad es la capacidad que la aplicó
-        ('Vulnerabilidades' o 'Pim'). Ya no se hardcodea.
-      - Estados unificados en listas separadas para objetos y vulnerabilidades.
-
-    ESTADOS DE OBJETOS:
-      'creado'        - creado por el laboratorio en esta ejecución
-      'reutilizado'   - ya existía en el tenant (creado por una ejecución
-                        anterior del laboratorio), reutilizado sin crear
-      'preexistente'  - ya existía ANTES del laboratorio (estaba en el
-                        snapshot pre-lab). NO se adopta, NO se modifica,
-                        NO se revierte.
-      'fallido'       - intento de creación fallido; se puede reintentar la reversión
-      'revertido'     - ya revertido
-      'no-revertido'  - no se pudo revertir (capacidad no disponible, objectId distinto)
-      'omitido'       - omitido por alguna razón (por ejemplo, preexistente)
-
-    ESTADOS DE VULNERABILIDADES:
-      'aplicada'      - aplicada y pendiente de revertir
-      'preexistente'  - no se aplicó porque el objeto objetivo era preexistente
-      'fallida'       - intento de aplicación fallido; se puede reintentar la reversión
-      'revertida'     - ya revertida
-      'no-revertida'  - no se pudo revertir
-      'omitida'       - omitida por configuración (exclusión)
-
-    SEGURIDAD:
-    El manifiesto NO contiene contraseñas. Solo guarda identificadores y
-    datos necesarios para revertir. Las contraseñas se derivan de la
-    semilla local del escenario y nunca se persisten aquí.
-    Los client secrets y los códigos TAP TAMPOCO se guardan: solo su keyId
-    o methodId, para poder revocarlos.
-
-    Los objetos con estado 'preexistente' son ignorados por el cleanup.
+    CONTRATO:
+      - Get-LabManifiesto SIEMPRE devuelve un [pscustomobject] con
+        todas las propiedades esperadas, o $null si el archivo no existe.
+      - objetos y vulnerabilidades son SIEMPRE arrays (@() si vacíos).
+      - Save-LabManifiesto normaliza y escribe manifestVersion explícito.
 .NOTES
     Depende de lib_ui.ps1.
-    Se carga por dot-sourcing desde menu.ps1.
+    Requiere PowerShell 7.
 #>
+#Requires -Version 7.0
+
+# Set-StrictMode -Version Latest
 
 # ============================================================
-# RUTA CANÓNICA
+# RUTA CANÓNICA Y VERSIÓN SOPORTADA
 # ============================================================
 $script:LabManifiestoFileName = 'manifiesto_lab.json'
 $script:LabManifiestoPath     = Join-Path $PSScriptRoot $script:LabManifiestoFileName
 $script:LabManifiestoVersion  = '2.1'
 
 # ============================================================
-# ESTADOS (LISTAS UNIFICADAS)
+# ESTADOS
 # ============================================================
-
-# Objetos: estados que el cleanup puede intentar revertir
+# Objetos
 $script:LabEstadosReversiblesObjeto = @('creado','reutilizado','fallido')
+$script:LabEstadosIgnoradosObjeto   = @('preexistente','revertido','no-revertido','omitido')
 
-# Objetos: estados que el cleanup debe ignorar
-$script:LabEstadosIgnoradosObjeto = @('preexistente','revertido','no-revertido','omitido')
-
-# Vulnerabilidades: estados que el cleanup puede intentar revertir
+# Vulnerabilidades
 $script:LabEstadosReversiblesVulnerabilidad = @('aplicada','fallida')
-
-# Vulnerabilidades: estados que el cleanup debe ignorar
-$script:LabEstadosIgnoradosVulnerabilidad = @('preexistente','revertida','no-revertida','omitida')
-
-# Alias de compatibilidad (código antiguo que consulte las listas globales)
-$script:LabEstadosReversibles = $script:LabEstadosReversiblesObjeto
-$script:LabEstadosIgnorados   = $script:LabEstadosIgnoradosObjeto
+$script:LabEstadosIgnoradosVulnerabilidad   = @('preexistente','revertida','no-revertida','omitida')
 
 # ============================================================
-# FUNCIONES PÚBLICAS: RUTAS Y EXISTENCIA
+# RUTAS Y EXISTENCIA
 # ============================================================
 
 function Get-LabManifiestoPath {
-    <#
-    .SYNOPSIS
-        Devuelve la ruta absoluta del manifiesto estándar.
-    #>
     return $script:LabManifiestoPath
 }
 
 function Test-LabManifiestoExists {
+    return (Test-Path -Path $script:LabManifiestoPath)
+}
+
+# ============================================================
+# COMPARACIÓN DE VERSIONES
+# ============================================================
+
+function Compare-LabVersion {
     <#
     .SYNOPSIS
-        Devuelve $true si existe el manifiesto estándar.
+        Compara dos strings de versión tipo 'X.Y'.
+    .DESCRIPTION
+        Devuelve 'mayor', 'menor' o 'igual' respecto a la versión
+        soportada. Ignora sufijos no numéricos para no romper con
+        versiones tipo '2.1-beta'.
     #>
-    return (Test-Path -Path $script:LabManifiestoPath)
+    param(
+        [Parameter(Mandatory = $true)] [string]$Version,
+        [Parameter(Mandatory = $true)] [string]$Referencia
+    )
+
+    $limpiar = {
+        param($v)
+        if ([string]::IsNullOrWhiteSpace($v)) { return $null }
+        $m = [regex]::Match($v, '^\s*(\d+)\.(\d+)')
+        if (-not $m.Success) { return $null }
+        return [version]("$($m.Groups[1].Value).$($m.Groups[2].Value)")
+    }
+
+    $v1 = & $limpiar $Version
+    $v2 = & $limpiar $Referencia
+    if ($null -eq $v1) { return 'desconocida' }
+    if ($null -eq $v2) { return 'desconocida' }
+
+    if ($v1 -gt $v2) { return 'mayor' }
+    if ($v1 -lt $v2) { return 'menor' }
+    return 'igual'
 }
 
 # ============================================================
@@ -118,18 +94,6 @@ function Test-LabManifiestoExists {
 # ============================================================
 
 function New-LabManifiestoVacio {
-    <#
-    .SYNOPSIS
-        Devuelve un manifiesto v2.1 vacío, listo para rellenar.
-    .PARAMETER Escenario
-        Nombre del escenario o de la sesión manual.
-    .PARAMETER Nivel
-        Nivel de licencia elegido ('Free', 'P1', 'P2').
-    .PARAMETER Semilla
-        Nombre de la semilla usada (no la semilla en sí).
-    .OUTPUTS
-        PSCustomObject con la estructura v2.1 vacía.
-    #>
     param(
         [string]$Escenario = $null,
         [string]$Nivel = 'Free',
@@ -156,55 +120,54 @@ function New-LabManifiestoVacio {
 function Get-LabManifiesto {
     <#
     .SYNOPSIS
-        Lee y normaliza el manifiesto. Devuelve $null si no existe.
+        Carga y normaliza un manifiesto.
     .DESCRIPTION
-        - Si el manifiesto es v1 (sin manifestVersion o con listas por tipo),
-          lo migra a v2 y luego a v2.1.
-        - Si el manifiesto es v2 (vulnerabilidades en objetos), lo migra a v2.1.
-        - Garantiza que 'objetos' y 'vulnerabilidades' son arrays.
-        - Garantiza que cada objeto tiene los campos comunes.
+        Devuelve un [pscustomobject] con las 9 propiedades esperadas.
+        objetos y vulnerabilidades son arrays. Cada elemento tiene sus
+        propiedades garantizadas.
     .PARAMETER Path
-        Ruta alternativa del manifiesto. Si se omite, se usa la estándar.
+        Ruta del manifiesto. Si se omite, la canónica.
     .OUTPUTS
-        PSCustomObject v2.1 normalizado, o $null si no existe.
+        [pscustomobject] normalizado, o $null si no existe.
     #>
-    param(
-        [string]$Path = $null
-    )
+    param([string]$Path = $null)
 
     if (-not $Path) { $Path = $script:LabManifiestoPath }
     if (-not (Test-Path -Path $Path)) { return $null }
 
-    $raw = Get-Content -Path $Path -Raw -Encoding UTF8 | ConvertFrom-Json
-
-    $version = $null
-    if ($raw.PSObject.Properties['manifestVersion']) {
-        $version = [string]$raw.manifestVersion
+    try {
+        $raw = Get-Content -Path $Path -Raw -Encoding UTF8 | ConvertFrom-Json
+    } catch {
+        throw "No se pudo leer el manifiesto: $($_.Exception.Message)"
     }
 
-    # v1 -> v2
-    if (-not $version -or $version -notmatch '^2\.') {
-        $raw = ConvertTo-LabManifiestoV2 -Raw $raw
-        $version = '2.0'
+    # --- Versión leída del archivo ---
+    $versionArchivo = $script:LabManifiestoVersion
+    if ($raw.PSObject.Properties['manifestVersion'] -and -not [string]::IsNullOrWhiteSpace([string]$raw.manifestVersion)) {
+        $versionArchivo = [string]$raw.manifestVersion
     }
 
-    # v2 -> v2.1 (mover vulnerabilidades de objetos a su array)
-    if ($version -eq '2.0') {
-        $raw = ConvertTo-LabManifiestoV21 -Raw $raw
+    $comparacion = Compare-LabVersion -Version $versionArchivo -Referencia $script:LabManifiestoVersion
+    switch ($comparacion) {
+        'mayor' {
+            Write-LabWarn "Manifiesto versión '$versionArchivo' es más nueva que la soportada ('$($script:LabManifiestoVersion)'). Se intentará cargar igualmente."
+        }
+        'menor' {
+            Write-LabWarn "Manifiesto versión '$versionArchivo' es más antigua que la soportada ('$($script:LabManifiestoVersion)'). Algunos campos pueden faltar."
+        }
+        'desconocida' {
+            Write-LabWarn "No se pudo interpretar manifestVersion '$versionArchivo'. Se asume '$($script:LabManifiestoVersion)'."
+            $versionArchivo = $script:LabManifiestoVersion
+        }
     }
 
-    $objetos = @()
-    if ($raw.PSObject.Properties['objetos'] -and $null -ne $raw.objetos) {
-        $objetos = @($raw.objetos)
-    }
-
-    $vulns = @()
-    if ($raw.PSObject.Properties['vulnerabilidades'] -and $null -ne $raw.vulnerabilidades) {
-        $vulns = @($raw.vulnerabilidades)
-    }
+    # --- Arrays normalizados ---
+    $objetosRaw = if ($raw.PSObject.Properties['objetos'] -and $null -ne $raw.objetos) { @($raw.objetos) } else { @() }
+    $vulnsRaw   = if ($raw.PSObject.Properties['vulnerabilidades'] -and $null -ne $raw.vulnerabilidades) { @($raw.vulnerabilidades) } else { @() }
 
     $objetosNorm = @()
-    foreach ($o in $objetos) {
+    foreach ($o in $objetosRaw) {
+        if ($null -eq $o) { continue }
         $objetosNorm += [pscustomobject]@{
             id        = if ($o.PSObject.Properties['id'])        { $o.id }        else { $null }
             tipo      = if ($o.PSObject.Properties['tipo'])      { $o.tipo }      else { 'Desconocido' }
@@ -217,7 +180,8 @@ function Get-LabManifiesto {
     }
 
     $vulnsNorm = @()
-    foreach ($v in $vulns) {
+    foreach ($v in $vulnsRaw) {
+        if ($null -eq $v) { continue }
         $vulnsNorm += [pscustomobject]@{
             id        = if ($v.PSObject.Properties['id'])        { $v.id }        else { $null }
             nombre    = if ($v.PSObject.Properties['nombre'])    { $v.nombre }    else { $null }
@@ -230,7 +194,7 @@ function Get-LabManifiesto {
     }
 
     return [pscustomobject]@{
-        manifestVersion  = $script:LabManifiestoVersion
+        manifestVersion  = $versionArchivo
         fecha            = if ($raw.PSObject.Properties['fecha'])        { $raw.fecha }        else { $null }
         tenantId         = if ($raw.PSObject.Properties['tenantId'])     { $raw.tenantId }     else { $null }
         tenantDomain     = if ($raw.PSObject.Properties['tenantDomain']) { $raw.tenantDomain } else { $null }
@@ -243,272 +207,24 @@ function Get-LabManifiesto {
 }
 
 # ============================================================
-# MIGRACIÓN v1 -> v2
-# ============================================================
-
-function ConvertTo-LabManifiestoV2 {
-    <#
-    .SYNOPSIS
-        Convierte un manifiesto v1 (listas por tipo) a v2 (lista plana).
-    .DESCRIPTION
-        Los objetos migrados desde v1 se marcan como 'creado', porque v1
-        no guardaba información de preexistencia. Es un compromiso: si
-        el objeto era preexistente, el cleanup intentará borrarlo.
-
-        Las vulnerabilidades v1 se migran con capacidad = 'Vulnerabilidades'
-        como fallback, porque v1 no guardaba la capacidad aplicadora.
-        Es una deuda histórica: si la carpeta cambia de nombre, el cleanup
-        no podrá revertirlas. El operador debe revisarlas antes de limpiar.
-    #>
-    param(
-        [Parameter(Mandatory = $true)]
-        [object]$Raw
-    )
-
-    $objetos = @()
-    $script:LabContadorV2 = 0
-
-    function New-IdV2 {
-        $script:LabContadorV2++
-        return ('obj-{0:D4}' -f $script:LabContadorV2)
-    }
-
-    $tenantId = if ($Raw.PSObject.Properties['TenantId']) { $Raw.TenantId } else { $null }
-    $ts = if ($Raw.PSObject.Properties['Fecha']) { $Raw.Fecha } else { (Get-Date).ToString('o') }
-
-    if ($Raw.PSObject.Properties['Usuarios'] -and $null -ne $Raw.Usuarios) {
-        foreach ($upn in @($Raw.Usuarios)) {
-            $objetos += [pscustomobject]@{
-                id        = New-IdV2
-                tipo      = 'Usuario'
-                capacidad = 'Usuarios'
-                estado    = 'creado'
-                timestamp = $ts
-                tenantId  = $tenantId
-                datos     = @{ upn = [string]$upn }
-            }
-        }
-    }
-
-    if ($Raw.PSObject.Properties['Grupos'] -and $null -ne $Raw.Grupos) {
-        foreach ($g in @($Raw.Grupos)) {
-            $objetos += [pscustomobject]@{
-                id        = New-IdV2
-                tipo      = 'Grupo'
-                capacidad = 'Grupos'
-                estado    = 'creado'
-                timestamp = $ts
-                tenantId  = $tenantId
-                datos     = @{ displayName = [string]$g }
-            }
-        }
-    }
-
-    if ($Raw.PSObject.Properties['Aplicaciones'] -and $null -ne $Raw.Aplicaciones) {
-        foreach ($a in @($Raw.Aplicaciones)) {
-            $objetos += [pscustomobject]@{
-                id        = New-IdV2
-                tipo      = 'Aplicacion'
-                capacidad = 'Aplicaciones'
-                estado    = 'creado'
-                timestamp = $ts
-                tenantId  = $tenantId
-                datos     = @{ displayName = [string]$a }
-            }
-        }
-    }
-
-    if ($Raw.PSObject.Properties['ServicePrincipals'] -and $null -ne $Raw.ServicePrincipals) {
-        foreach ($spId in @($Raw.ServicePrincipals)) {
-            $objetos += [pscustomobject]@{
-                id        = New-IdV2
-                tipo      = 'ServicePrincipal'
-                capacidad = 'Aplicaciones'
-                estado    = 'creado'
-                timestamp = $ts
-                tenantId  = $tenantId
-                datos     = @{ objectId = [string]$spId }
-            }
-        }
-    }
-
-    $vulns = @()
-    if ($Raw.PSObject.Properties['Vulnerabilidades'] -and $null -ne $Raw.Vulnerabilidades) {
-        $contadorV = 0
-        foreach ($v in @($Raw.Vulnerabilidades)) {
-            $contadorV++
-            $vulns += [pscustomobject]@{
-                id        = ('vuln-{0:D4}' -f $contadorV)
-                nombre    = if ($v.PSObject.Properties['nombre']) { $v.nombre } else { $null }
-                tipo      = if ($v.PSObject.Properties['tipo'])   { $v.tipo }   else { 'Desconocido' }
-                capacidad = 'Vulnerabilidades'
-                estado    = 'aplicada'
-                timestamp = $ts
-                datos     = if ($v.PSObject.Properties['objetosAfectados']) { @{ objetosAfectados = $v.objetosAfectados } } else { @{} }
-            }
-        }
-    }
-
-    return [pscustomobject]@{
-        manifestVersion  = '2.0'
-        fecha            = $ts
-        tenantId         = $tenantId
-        tenantDomain     = if ($Raw.PSObject.Properties['TenantDomain']) { $Raw.TenantDomain } else { $null }
-        nivel            = 'Free'
-        escenario        = $null
-        semilla          = $null
-        objetos          = $objetos
-        vulnerabilidades = $vulns
-    }
-}
-
-# ============================================================
-# MIGRACIÓN v2 -> v2.1
-# ============================================================
-
-function ConvertTo-LabManifiestoV21 {
-    <#
-    .SYNOPSIS
-        Convierte un manifiesto v2 (vulnerabilidades en objetos) a v2.1.
-    .DESCRIPTION
-        En v2, cap_vulnerabilidades.Crear devolvía objetos con
-        tipo = 'VulnerabilidadAplicada' y capacidad = 'Vulnerabilidades',
-        y Add-LabObjetoAlManifiesto los metía en 'objetos'. En v2.1 viven
-        en 'vulnerabilidades'.
-
-        Esta migración:
-          1. Separa los objetos con capacidad = 'Vulnerabilidades' (o
-             tipo que empiece por 'Vulnerabilidad').
-          2. Los convierte a la forma de vulnerabilidad (id, nombre, tipo,
-             capacidad, estado, timestamp, datos).
-          3. Mapea el estado:
-               'creado'        -> 'aplicada'
-               'preexistente'  -> 'preexistente'
-               'fallido'       -> 'fallida'
-               'revertido'     -> 'revertida'
-               'no-revertido'  -> 'no-revertida'
-               'omitido'       -> 'omitida'
-          4. Deja el resto de objetos intactos.
-          5. Marca manifestVersion = '2.1'.
-    .PARAMETER Raw
-        Manifiesto v2 cargado desde disco.
-    .OUTPUTS
-        PSCustomObject v2.1.
-    #>
-    param(
-        [Parameter(Mandatory = $true)]
-        [object]$Raw
-    )
-
-    $objetosOriginales = @()
-    if ($Raw.PSObject.Properties['objetos'] -and $null -ne $Raw.objetos) {
-        $objetosOriginales = @($Raw.objetos)
-    }
-
-    $vulnsOriginales = @()
-    if ($Raw.PSObject.Properties['vulnerabilidades'] -and $null -ne $Raw.vulnerabilidades) {
-        $vulnsOriginales = @($Raw.vulnerabilidades)
-    }
-
-    $objetos = @()
-    $vulns = @()
-
-    # Vulnerabilidades ya existentes en v2 (array propio): conservar
-    foreach ($v in $vulnsOriginales) {
-        $vulns += [pscustomobject]@{
-            id        = if ($v.PSObject.Properties['id'])        { $v.id }        else { $null }
-            nombre    = if ($v.PSObject.Properties['nombre'])    { $v.nombre }    else { $null }
-            tipo      = if ($v.PSObject.Properties['tipo'])      { $v.tipo }      else { 'Desconocido' }
-            capacidad = if ($v.PSObject.Properties['capacidad']) { $v.capacidad } else { 'Vulnerabilidades' }
-            estado    = if ($v.PSObject.Properties['estado'])    { $v.estado }    else { 'aplicada' }
-            timestamp = if ($v.PSObject.Properties['timestamp']) { $v.timestamp } else { $null }
-            datos     = if ($v.PSObject.Properties['datos'])     { $v.datos }     else { @{} }
-        }
-    }
-
-    # Separar objetos: vulnerabilidades mal ubicadas vs objetos reales
-    foreach ($o in $objetosOriginales) {
-        $tipo = if ($o.PSObject.Properties['tipo']) { [string]$o.tipo } else { '' }
-        $capacidad = if ($o.PSObject.Properties['capacidad']) { [string]$o.capacidad } else { '' }
-
-        $esVulnerabilidad = ($capacidad -eq 'Vulnerabilidades') -or
-                            ($tipo -eq 'VulnerabilidadAplicada') -or
-                            ($tipo -like 'Vulnerab*')
-
-        if (-not $esVulnerabilidad) {
-            $objetos += $o
-            continue
-        }
-
-        # Convertir objeto-vulnerabilidad a vulnerabilidad
-        $estadoV2 = if ($o.PSObject.Properties['estado']) { [string]$o.estado } else { 'creado' }
-        $estadoV21 = switch ($estadoV2) {
-            'creado'       { 'aplicada' }
-            'preexistente' { 'preexistente' }
-            'fallido'      { 'fallida' }
-            'revertido'    { 'revertida' }
-            'no-revertido' { 'no-revertida' }
-            'omitido'      { 'omitida' }
-            default        { 'aplicada' }
-        }
-
-        $datosOriginales = if ($o.PSObject.Properties['datos']) { $o.datos } else { @{} }
-
-        # El tipo real de la vulnerabilidad estaba en datos.tipoVulnerabilidad
-        $tipoVuln = if ($datosOriginales.PSObject.Properties['tipoVulnerabilidad']) {
-            [string]$datosOriginales.tipoVulnerabilidad
-        } else {
-            $tipo
-        }
-
-        $nombreVuln = if ($datosOriginales.PSObject.Properties['nombre']) {
-            [string]$datosOriginales.nombre
-        } else {
-            $null
-        }
-
-        $vulns += [pscustomobject]@{
-            id        = if ($o.PSObject.Properties['id'])        { $o.id }        else { $null }
-            nombre    = $nombreVuln
-            tipo      = $tipoVuln
-            capacidad = if ($capacidad) { $capacidad } else { 'Vulnerabilidades' }
-            estado    = $estadoV21
-            timestamp = if ($o.PSObject.Properties['timestamp']) { $o.timestamp } else { $null }
-            datos     = $datosOriginales
-        }
-    }
-
-    return [pscustomobject]@{
-        manifestVersion  = '2.1'
-        fecha            = if ($Raw.PSObject.Properties['fecha'])        { $Raw.fecha }        else { $null }
-        tenantId         = if ($Raw.PSObject.Properties['tenantId'])     { $Raw.tenantId }     else { $null }
-        tenantDomain     = if ($Raw.PSObject.Properties['tenantDomain']) { $Raw.tenantDomain } else { $null }
-        nivel            = if ($Raw.PSObject.Properties['nivel'])        { $Raw.nivel }        else { 'Free' }
-        escenario        = if ($Raw.PSObject.Properties['escenario'])    { $Raw.escenario }    else { $null }
-        semilla          = if ($Raw.PSObject.Properties['semilla'])      { $Raw.semilla }      else { $null }
-        objetos          = $objetos
-        vulnerabilidades = $vulns
-    }
-}
-
-# ============================================================
 # GUARDADO
 # ============================================================
 
 function Save-LabManifiesto {
     <#
     .SYNOPSIS
-        Guarda el manifiesto en disco.
+        Guarda el manifiesto normalizado en disco.
+    .DESCRIPTION
+        Acepta [pscustomobject] o [hashtable]. Normaliza antes de escribir
+        y garantiza manifestVersion explícito en el archivo.
     .PARAMETER Manifiesto
-        Manifiesto v2.1 (PSCustomObject).
+        Manifiesto a guardar.
     .PARAMETER Path
-        Ruta destino. Si se omite, se usa la estándar.
-    .OUTPUTS
-        $true si se guardó, $false si falló.
+        Ruta destino. Si se omite, la canónica.
     #>
     param(
         [Parameter(Mandatory = $true)]
-        [object]$Manifiesto,
+        $Manifiesto,
 
         [string]$Path = $null
     )
@@ -516,7 +232,23 @@ function Save-LabManifiesto {
     if (-not $Path) { $Path = $script:LabManifiestoPath }
 
     try {
-        $Manifiesto | ConvertTo-Json -Depth 15 | Set-Content -Path $Path -Encoding UTF8 -Force
+        $normalizado = [pscustomobject]@{
+            manifestVersion  = if ($Manifiesto.PSObject.Properties['manifestVersion'] -and -not [string]::IsNullOrWhiteSpace([string]$Manifiesto.manifestVersion)) {
+                                   [string]$Manifiesto.manifestVersion
+                               } else {
+                                   $script:LabManifiestoVersion
+                               }
+            fecha            = if ($Manifiesto.PSObject.Properties['fecha'])        { $Manifiesto.fecha }        else { (Get-Date).ToString('o') }
+            tenantId         = if ($Manifiesto.PSObject.Properties['tenantId'])     { $Manifiesto.tenantId }     else { $null }
+            tenantDomain     = if ($Manifiesto.PSObject.Properties['tenantDomain']) { $Manifiesto.tenantDomain } else { $null }
+            nivel            = if ($Manifiesto.PSObject.Properties['nivel'])        { $Manifiesto.nivel }        else { 'Free' }
+            escenario        = if ($Manifiesto.PSObject.Properties['escenario'])    { $Manifiesto.escenario }    else { $null }
+            semilla          = if ($Manifiesto.PSObject.Properties['semilla'])      { $Manifiesto.semilla }      else { $null }
+            objetos          = @($Manifiesto.objetos)
+            vulnerabilidades = @($Manifiesto.vulnerabilidades)
+        }
+
+        $normalizado | ConvertTo-Json -Depth 15 | Set-Content -Path $Path -Encoding UTF8 -Force
         return $true
     } catch {
         Write-LabWarn "No se pudo guardar el manifiesto: $($_.Exception.Message)"
@@ -531,33 +263,39 @@ function Save-LabManifiesto {
 function Get-LabManifiestoStatus {
     <#
     .SYNOPSIS
-        Devuelve un resumen del manifiesto para mostrar en el menú.
-    .DESCRIPTION
-        Usa Get-LabManifiestoPendientes para que la definición de
-        "pendiente" sea única (objetos y vulnerabilidades).
+        Devuelve un resumen del manifiesto canónico para el menú.
     .OUTPUTS
-        $null          si no existe manifiesto
-        'ilegible'     si existe pero no se puede leer
         PSCustomObject con Fecha, Tenant, Nivel, Escenario, Objetos,
-        Pendientes, Preexistentes, Vulnerabilidades
+        Pendientes, Preexistentes, Vulnerabilidades, ManifestVersion y
+        Soporte ('ok'|'antigua'|'futura'|'desconocida'|'ilegible').
     #>
     if (-not (Test-LabManifiestoExists)) { return $null }
 
     try {
         $m = Get-LabManifiesto -Path $script:LabManifiestoPath
-        $pendientes = Get-LabManifiestoPendientes -Manifiesto $m
+        if ($null -eq $m) { return 'ilegible' }
 
+        $pendientes = Get-LabManifiestoPendientes -Manifiesto $m
         $preexistentes = @($m.objetos | Where-Object { $_.estado -eq 'preexistente' }).Count
+
+        $soporte = 'ok'
+        switch (Compare-LabVersion -Version $m.manifestVersion -Referencia $script:LabManifiestoVersion) {
+            'mayor'        { $soporte = 'futura' }
+            'menor'        { $soporte = 'antigua' }
+            'desconocida'  { $soporte = 'desconocida' }
+        }
 
         return [pscustomobject]@{
             Fecha            = $m.fecha
             Tenant           = $m.tenantDomain
             Nivel            = $m.nivel
             Escenario        = $m.escenario
-            Objetos          = $m.objetos.Count
-            Pendientes       = $pendientes.objetos.Count
+            Objetos          = @($m.objetos).Count
+            Pendientes       = @($pendientes.objetos).Count
             Preexistentes    = $preexistentes
-            Vulnerabilidades = $pendientes.vulnerabilidades.Count
+            Vulnerabilidades = @($pendientes.vulnerabilidades).Count
+            ManifestVersion  = $m.manifestVersion
+            Soporte          = $soporte
         }
     } catch {
         return 'ilegible'
@@ -571,15 +309,24 @@ function Get-LabManifiestoStatus {
 function Rename-LabManifiestoProcesado {
     <#
     .SYNOPSIS
-        Renombra el manifiesto actual con sufijo _procesado_<timestamp>.
+        Renombra el manifiesto como procesado.
+    .DESCRIPTION
+        Con -Path, renombra el archivo indicado (para clean.ps1 u otros
+        flujos que trabajen con un manifiesto específico). Sin -Path,
+        usa el manifiesto canónico.
+    .PARAMETER Path
+        Ruta del manifiesto a renombrar.
     .OUTPUTS
-        Ruta del nuevo fichero, o $null si no había manifiesto o falló.
+        Ruta nueva del archivo, o $null si no se pudo renombrar.
     #>
-    if (-not (Test-LabManifiestoExists)) { return $null }
+    param([string]$Path = $null)
+
+    if (-not $Path) { $Path = $script:LabManifiestoPath }
+    if (-not (Test-Path -Path $Path)) { return $null }
 
     try {
-        $nuevoPath = $script:LabManifiestoPath -replace '\.json$', "_procesado_$(Get-Date -Format 'yyyyMMdd_HHmmss').json"
-        $null = Move-Item -Path $script:LabManifiestoPath -Destination $nuevoPath -Force -ErrorAction Stop
+        $nuevoPath = $Path -replace '\.json$', "_procesado_$(Get-Date -Format 'yyyyMMdd_HHmmss').json"
+        Move-Item -Path $Path -Destination $nuevoPath -Force -ErrorAction Stop
         return $nuevoPath
     } catch {
         Write-LabWarn "No se pudo renombrar el manifiesto: $($_.Exception.Message)"
@@ -594,18 +341,9 @@ function Rename-LabManifiestoProcesado {
 function Get-LabManifiestoPendientes {
     <#
     .SYNOPSIS
-        Devuelve solo los objetos y vulnerabilidades pendientes de revertir.
-    .DESCRIPTION
-        Usa las listas unificadas:
-          - Objetos: $script:LabEstadosReversiblesObjeto
-          - Vulnerabilidades: $script:LabEstadosReversiblesVulnerabilidad
-
-        Es la ÚNICA fuente de verdad sobre qué es "pendiente". Ningún otro
-        sitio debe duplicar esta lógica.
-    .PARAMETER Manifiesto
-        Manifiesto v2.1.
+        Devuelve los objetos y vulnerabilidades en estado reversible.
     .OUTPUTS
-        Hashtable con 'objetos' y 'vulnerabilidades' pendientes.
+        Hashtable con 'objetos' y 'vulnerabilidades' (arrays).
     #>
     param(
         [Parameter(Mandatory = $true)]
@@ -621,32 +359,10 @@ function Get-LabManifiestoPendientes {
 function Add-LabManifiestoVulnerabilidad {
     <#
     .SYNOPSIS
-        Añade una vulnerabilidad aplicada al manifiesto.
-    .DESCRIPTION
-        La capacidad aplicadora es OBLIGATORIA. Ya no se hardcodea
-        'Vulnerabilidades': si una vulnerabilidad la aplica 'Pim' (por
-        delegación), se registra con capacidad = 'Pim'. El cleanup usará
-        esa capacidad para despachar la reversión.
-
-        El estado por defecto es 'aplicada'. Se puede sobrescribir con
-        -Estado (por ejemplo, 'preexistente' si el objeto objetivo ya
-        existía antes del laboratorio y no se ha tocado).
-    .PARAMETER Manifiesto
-        Manifiesto v2.1 (se muta).
-    .PARAMETER Nombre
-        Nombre de la vulnerabilidad (el que el operador le dio).
-    .PARAMETER Tipo
-        Tipo de vulnerabilidad (ServicePrincipalOwner, GroupOwner,
-        ApplicationSecret, PimEligibleRole...).
+        Añade una vulnerabilidad al manifiesto.
     .PARAMETER Capacidad
-        NOMBRE de la capacidad que la aplicó. Obligatorio.
-    .PARAMETER Datos
-        Datos específicos para revertir. Debe incluir el objectId del
-        objeto afectado si se conoce, para que el cleanup pueda verificar.
-    .PARAMETER Estado
-        Estado inicial. Por defecto 'aplicada'.
-    .OUTPUTS
-        El objeto añadido.
+        Nombre de la capacidad que aplicó la vulnerabilidad. Debe ser
+        un string no vacío.
     #>
     param(
         [Parameter(Mandatory = $true)]
@@ -659,7 +375,7 @@ function Add-LabManifiestoVulnerabilidad {
         [string]$Tipo,
 
         [Parameter(Mandatory = $true)]
-        [string]$Capacidad,
+        $Capacidad,
 
         [Parameter(Mandatory = $false)]
         [hashtable]$Datos = @{},
@@ -668,22 +384,23 @@ function Add-LabManifiestoVulnerabilidad {
         [string]$Estado = 'aplicada'
     )
 
-    if ([string]::IsNullOrWhiteSpace($Capacidad)) {
-        throw 'Add-LabManifiestoVulnerabilidad: -Capacidad es obligatorio.'
+    if ($Capacidad -isnot [string] -or [string]::IsNullOrWhiteSpace($Capacidad)) {
+        Write-LabWarn 'Add-LabManifiestoVulnerabilidad: -Capacidad debe ser un string no vacío. Se ignora la operación.'
+        return $null
     }
 
-    $id = 'vuln-{0:D4}' -f ($Manifiesto.vulnerabilidades.Count + 1)
-    
+    $id = 'vuln-{0:D4}' -f (@($Manifiesto.vulnerabilidades).Count + 1)
+
     $v = [pscustomobject]@{
         id        = $id
         nombre    = $Nombre
         tipo      = $Tipo
-        capacidad = $Capacidad
+        capacidad = $Capacidad.Trim()
         estado    = $Estado
         timestamp = (Get-Date).ToString('o')
         datos     = $Datos
     }
-    
+
     $Manifiesto.vulnerabilidades += $v
     return $v
 }

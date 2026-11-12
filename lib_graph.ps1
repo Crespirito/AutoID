@@ -1,37 +1,70 @@
 <#
 .SYNOPSIS
-    Librería de gestión de sesión de Microsoft Graph.
+    Librería de gestión de sesión de Microsoft Graph (Exclusivo App-Only).
 .DESCRIPTION
     Proporciona:
       - Instalación del módulo Microsoft.Graph si no está presente.
       - Conexión App-Only con certificado (ClientId + TenantId + Thumbprint).
-      - Conexión delegada vía az login (token de Azure CLI).
-      - Verificación de sesión activa (App-Only o Delegated).
+      - Verificación de sesión activa.
       - Estado de la sesión actual.
       - Desconexión limpia.
       - Listado y carga de certificados desde Cert:\CurrentUser\My.
       - Reintento automático de operaciones con backoff para 429/503.
+      - Caché de SKUs del tenant (Get-LabSubscribedSku).
+      - Dominio verificado del tenant (Get-LabTenantDomain).
+      - Nivel real del tenant con distinción entre "sin licencia" y
+        "sin permisos" (Get-LabGraphNivelRealStatus).
+
+    Para PowerShell 7 (pwsh):
+      - Desactiva WAM (Web Account Manager) para evitar que use la cuenta
+        de Windows en lugar del certificado.
+      - Forza el flujo estricto App-Only.
+
+    NOTA: La conexión delegada (az login o login interactivo) ha sido
+    eliminada de esta versión. Todo el laboratorio funciona con App-Only.
 .NOTES
     Depende de lib_ui.ps1 y lib_config.ps1.
     Se carga por dot-sourcing desde menu.ps1.
-
-    MODOS DE CONEXIÓN:
-    1. App-Only con certificado (por defecto):
-       Connect-MgGraph -ClientId ... -TenantId ... -CertificateThumbprint ...
-       El certificado debe estar en Cert:\CurrentUser\My con clave privada.
-
-    2. Delegado vía az login (opcional):
-       Obtiene un token de Graph con az account get-access-token y lo pasa
-       a Connect-MgGraph -AccessToken. Requiere Azure CLI instalado y una
-       sesión de az login activa. Los permisos son los del usuario, no los
-       de la App registrada.
+    Requiere PowerShell 7.
 #>
+#Requires -Version 7.0
+
+# Set-StrictMode -Version Latest
 
 # ============================================================
 # ESTADO INTERNO
 # ============================================================
 $script:LabGraphRetryMaxIntentos = 5
 $script:LabGraphRetryDelayBaseSeg = 1
+
+# Caché de SKUs del tenant
+$script:LabSkuCache              = $null
+$script:LabSkuCacheTimestamp     = $null
+$script:LabSkuCacheTTLSegundos   = 300   # 5 minutos
+
+# Caché del dominio verificado del tenant
+$script:LabTenantDomainCache     = $null
+$script:LabTenantDomainTimestamp = $null
+$script:LabTenantDomainTTLSeg    = 3600  # 1 hora
+
+# ============================================================
+# UTILIDADES INTERNAS
+# ============================================================
+
+function Test-LabGuid {
+    <#
+    .SYNOPSIS
+        Devuelve $true si la cadena es un GUID válido (con o sin llaves).
+    #>
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Valor
+    )
+
+    if ([string]::IsNullOrWhiteSpace($Valor)) { return $false }
+    $g = [guid]::Empty
+    return [guid]::TryParse($Valor.Trim(), [ref]$g)
+}
 
 # ============================================================
 # SESIÓN
@@ -40,18 +73,13 @@ $script:LabGraphRetryDelayBaseSeg = 1
 function Test-LabGraphSession {
     <#
     .SYNOPSIS
-        Devuelve $true si hay una sesión de Graph activa (App-Only o Delegated).
-    .DESCRIPTION
-        Verifica que Get-MgContext devuelve un contexto con TenantId y
-        AuthType 'AppOnly' o 'Delegated'. En versiones anteriores solo se
-        aceptaba AppOnly; ahora también se acepta Delegated para permitir
-        la conexión vía az login.
+        Devuelve $true si hay una sesión de Graph activa (App-Only).
     #>
     try {
         $ctx = Get-MgContext -ErrorAction Stop
         if ($null -eq $ctx) { return $false }
         if ([string]::IsNullOrWhiteSpace($ctx.TenantId)) { return $false }
-        if ($ctx.AuthType -notin @('AppOnly','Delegated')) { return $false }
+        if ($ctx.AuthType -ne 'AppOnly') { return $false }
         return $true
     } catch {
         return $false
@@ -62,8 +90,6 @@ function Get-LabGraphStatus {
     <#
     .SYNOPSIS
         Devuelve un objeto con el estado de la sesión, o $null si no hay.
-    .OUTPUTS
-        PSCustomObject con AuthType, TenantId, ClientId y Scopes, o $null.
     #>
     if (-not (Test-LabGraphSession)) { return $null }
 
@@ -72,7 +98,7 @@ function Get-LabGraphStatus {
         AuthType = $ctx.AuthType
         TenantId = $ctx.TenantId
         ClientId = $ctx.ClientId
-        Scopes   = ($ctx.Scopes -join ', ')
+        Scopes   = if ($ctx.Scopes) { ($ctx.Scopes -join ', ') } else { '' }
     }
 }
 
@@ -88,7 +114,7 @@ function Install-LabGraphModule {
     Write-LabWarn 'Módulo Microsoft.Graph no encontrado. Instalando desde PSGallery (puede tardar)...'
 
     try {
-        Install-Module -Name Microsoft.Graph -Scope CurrentUser -Repository PSGallery -Force -ErrorAction Stop
+        Install-Module -Name Microsoft.Graph -Scope CurrentUser -Repository PSGallery -Force -AllowClobber -ErrorAction Stop
         Write-LabOk 'Módulo Microsoft.Graph instalado.'
         return $true
     } catch {
@@ -102,14 +128,17 @@ function Connect-LabGraph {
     .SYNOPSIS
         Conecta a Microsoft Graph en modo App-Only con certificado.
     .DESCRIPTION
-        Usa el flujo client credentials con CertificateThumbprint. El
-        certificado debe estar en Cert:\CurrentUser\My con clave privada.
-        No se pasan scopes: los permisos se configuran en el registro
-        de la App en Entra ID y se conceden con consentimiento de admin.
+        Usa el flujo client credentials con CertificateThumbprint.
+        Fuerza la desactivación de WAM (Web Account Manager) para evitar que
+        PowerShell 7 use la cuenta de Windows.
+
+        Valida el formato GUID de ClientId y TenantId antes de llamar a
+        Connect-MgGraph, para dar un mensaje de error claro en lugar del
+        error genérico del SDK.
     .PARAMETER ClientId
-        Application (client) ID del registro de la App.
+        Application (client) ID del registro de la App. Debe ser GUID.
     .PARAMETER TenantId
-        Directory (tenant) ID del tenant.
+        Directory (tenant) ID del tenant. Debe ser GUID.
     .PARAMETER CertificateThumbprint
         Thumbprint del certificado en Cert:\CurrentUser\My.
     .PARAMETER NoWelcome
@@ -135,6 +164,18 @@ function Connect-LabGraph {
         return $true
     }
 
+    # Validación GUID (N22): ClientId y TenantId
+    if (-not (Test-LabGuid -Valor $ClientId)) {
+        Write-LabError "ClientId inválido: '$ClientId'. Debe ser un GUID (Application (client) ID)."
+        Write-LabInfo 'Usa [S] Gestionar sesión de Graph para corregir la configuración.'
+        return $false
+    }
+    if (-not (Test-LabGuid -Valor $TenantId)) {
+        Write-LabError "TenantId inválido: '$TenantId'. Debe ser un GUID (Directory (tenant) ID)."
+        Write-LabInfo 'Usa [S] Gestionar sesión de Graph para corregir la configuración.'
+        return $false
+    }
+
     if (-not (Install-LabGraphModule)) {
         return $false
     }
@@ -146,24 +187,35 @@ function Connect-LabGraph {
         return $false
     }
 
+    # Forzar la desactivación de WAM en PowerShell 7
+    try {
+        $env:AZURE_IDENTITY_DISABLE_WAM = "1"
+        if (Get-Command Set-MgGraphOption -ErrorAction SilentlyContinue) {
+            Set-MgGraphOption -DisableLoginByWAM $true -ErrorAction SilentlyContinue
+        }
+    } catch {
+        # Si falla, lo ignoramos silenciosamente
+    }
+
     # Verificar que el certificado existe y tiene clave privada
     $certPath = "Cert:\CurrentUser\My\$CertificateThumbprint"
     if (-not (Test-Path -Path $certPath)) {
         Write-LabError "No se encuentra el certificado con Thumbprint '$CertificateThumbprint' en Cert:\CurrentUser\My."
-        Write-LabInfo 'Usa [C] Gestionar sesión de Graph para seleccionar o importar un certificado.'
+        Write-LabInfo 'Usa [S] Gestionar sesión de Graph para seleccionar o importar un certificado .pfx.'
         return $false
     }
 
     $cert = Get-Item -Path $certPath -ErrorAction SilentlyContinue
     if ($null -eq $cert -or -not $cert.HasPrivateKey) {
         Write-LabError 'El certificado no tiene clave privada. No sirve para App-Only.'
+        Write-LabInfo 'Asegúrate de haber importado el archivo .pfx (no el .cer) con la clave privada.'
         return $false
     }
 
     try {
         $params = @{
-            ClientId              = $ClientId
-            TenantId              = $TenantId
+            ClientId              = $ClientId.Trim()
+            TenantId              = $TenantId.Trim()
             CertificateThumbprint = $CertificateThumbprint
         }
         if ($NoWelcome) { $params.NoWelcome = $true }
@@ -171,6 +223,10 @@ function Connect-LabGraph {
         $null = Connect-MgGraph @params -ErrorAction Stop
     } catch {
         Write-LabError "Fallo al conectar con Microsoft Graph (App-Only): $($_.Exception.Message)"
+
+        if ($_.Exception.Message -match 'Invalid client|unauthorized|401') {
+            Write-LabInfo 'Comprueba que el ClientId y el TenantId son correctos y que el certificado está subido en Azure.'
+        }
         return $false
     }
 
@@ -180,75 +236,12 @@ function Connect-LabGraph {
         return $false
     }
 
+    # Al conectar, invalidamos las cachés por si cambia el tenant
+    Clear-LabSkuCache
+    Clear-LabTenantDomainCache
+
     $status = Get-LabGraphStatus
     Write-LabOk "Sesión App-Only establecida. Tenant: $($status.TenantId) | ClientId: $($status.ClientId)."
-    return $true
-}
-
-function Connect-LabGraphConAzLogin {
-    <#
-    .SYNOPSIS
-        Conecta a Graph usando un token obtenido con az login.
-    .DESCRIPTION
-        Obtiene un token de Graph con az account get-access-token y lo pasa
-        a Connect-MgGraph -AccessToken. Requiere Azure CLI instalado y que
-        el operador haya ejecutado az login previamente. La sesión resultante
-        es delegada (AuthType = 'Delegated') y usa los permisos del usuario.
-    .OUTPUTS
-        $true si la conexión se estableció correctamente, $false si falló.
-    #>
-    # 1. Comprobar que az está disponible
-    if (-not (Get-Command az -ErrorAction SilentlyContinue)) {
-        Write-LabError 'Azure CLI (az) no está instalado o no está en el PATH.'
-        Write-LabInfo 'Instala Azure CLI y ejecuta "az login" antes de usar esta opción.'
-        return $false
-    }
-
-    # 2. Comprobar que hay una sesión de az activa
-    try {
-        $azAccount = az account show --output json 2>$null | ConvertFrom-Json
-    } catch {
-        $azAccount = $null
-    }
-    if ($null -eq $azAccount) {
-        Write-LabWarn 'No hay sesión de Azure CLI activa. Ejecuta "az login" primero.'
-        return $false
-    }
-
-    Write-LabInfo "Usuario de Azure CLI: $($azAccount.user.name) | Tenant: $($azAccount.tenantId)"
-
-    # 3. Obtener el token de Graph
-    try {
-        $tokenJson = az account get-access-token --resource-type ms-graph --output json 2>$null | ConvertFrom-Json
-        $token = $tokenJson.accessToken
-    } catch {
-        Write-LabError "No se pudo obtener el token de Graph con az: $($_.Exception.Message)"
-        return $false
-    }
-
-    if ([string]::IsNullOrWhiteSpace($token)) {
-        Write-LabError 'az devolvió un token vacío.'
-        return $false
-    }
-
-    # 4. Conectar con el token
-    try {
-        $secureToken = ConvertTo-SecureString -String $token -AsPlainText -Force
-        $null = Connect-MgGraph -AccessToken $secureToken -NoWelcome -ErrorAction Stop
-    } catch {
-        Write-LabError "No se pudo conectar a Graph con el token de az: $($_.Exception.Message)"
-        return $false
-    }
-
-    # 5. Verificar que la sesión es válida
-    if (-not (Test-LabGraphSession)) {
-        Write-LabError 'La conexión se ejecutó pero no hay sesión válida.'
-        return $false
-    }
-
-    $status = Get-LabGraphStatus
-    Write-LabOk "Sesión establecida vía az login. Usuario: $($azAccount.user.name) | Tenant: $($status.TenantId)"
-    Write-LabInfo 'Nota: esta sesión es delegada. Los permisos son los del usuario, no los de la App registrada.'
     return $true
 }
 
@@ -266,7 +259,201 @@ function Disconnect-LabGraph {
         Write-LabInfo 'Sesión de Microsoft Graph cerrada.'
     } catch {
         Write-LabWarn "No se pudo cerrar la sesión limpiamente: $($_.Exception.Message)"
+    } finally {
+        # Limpiar cachés al desconectar
+        Clear-LabSkuCache
+        Clear-LabTenantDomainCache
     }
+}
+
+# ============================================================
+# CACHÉ DE SKUs Y DOMINIO DEL TENANT
+# ============================================================
+
+function Clear-LabSkuCache {
+    <#
+    .SYNOPSIS
+        Invalida la caché de SKUs del tenant.
+    #>
+    $script:LabSkuCache          = $null
+    $script:LabSkuCacheTimestamp = $null
+}
+
+function Clear-LabTenantDomainCache {
+    <#
+    .SYNOPSIS
+        Invalida la caché del dominio verificado del tenant.
+    #>
+    $script:LabTenantDomainCache     = $null
+    $script:LabTenantDomainTimestamp = $null
+}
+
+function Get-LabSubscribedSku {
+    <#
+    .SYNOPSIS
+        Devuelve los SKUs suscritos del tenant, con caché en memoria.
+    .DESCRIPTION
+        Cachea el resultado de Get-MgSubscribedSku durante LabSkuCacheTTLSegundos
+        (5 min por defecto) para evitar llamadas repetidas a Graph en cada
+        refresco de pantalla.
+
+        IMPORTANTE: no usar -All. En algunas versiones del módulo Graph,
+        Get-MgSubscribedSku -All se queda colgado (paginación sin retorno).
+        Un tenant tiene pocos SKUs (decenas como mucho), así que la primera
+        página contiene todo lo relevante para el laboratorio.
+    .PARAMETER Forzar
+        Si se especifica, ignora la caché y vuelve a consultar Graph.
+    .OUTPUTS
+        Array de SKUs (puede estar vacío). Nunca $null.
+    #>
+    param(
+        [switch]$Forzar
+    )
+
+    $ahora = Get-Date
+
+    if (-not $Forzar -and
+        $null -ne $script:LabSkuCache -and
+        $null -ne $script:LabSkuCacheTimestamp -and
+        ($ahora - $script:LabSkuCacheTimestamp).TotalSeconds -lt $script:LabSkuCacheTTLSegundos) {
+        return $script:LabSkuCache
+    }
+
+    try {
+        # No usar -All: ver nota en el docstring
+        $skus = @(Get-MgSubscribedSku -ErrorAction Stop)
+        $script:LabSkuCache          = $skus
+        $script:LabSkuCacheTimestamp = $ahora
+        return $skus
+    } catch {
+        # No cacheamos errores: la próxima llamada reintenta
+        Clear-LabSkuCache
+        throw
+    }
+}
+
+function Get-LabTenantDomain {
+    <#
+    .SYNOPSIS
+        Devuelve el dominio verificado del tenant (por ejemplo contoso.onmicrosoft.com).
+    .DESCRIPTION
+        Consulta Get-MgOrganization una sola vez y cachea el resultado.
+        Prefiere el dominio marcado como IsDefault entre los VerifiedDomains.
+        Si no hay sesión o no se puede consultar, devuelve $null.
+    .PARAMETER Forzar
+        Si se especifica, ignora la caché y vuelve a consultar Graph.
+    .OUTPUTS
+        String con el dominio, o $null si no se pudo resolver.
+    #>
+    param(
+        [switch]$Forzar
+    )
+
+    if (-not (Test-LabGraphSession)) { return $null }
+
+    $ahora = Get-Date
+
+    if (-not $Forzar -and
+        -not [string]::IsNullOrWhiteSpace($script:LabTenantDomainCache) -and
+        $null -ne $script:LabTenantDomainTimestamp -and
+        ($ahora - $script:LabTenantDomainTimestamp).TotalSeconds -lt $script:LabTenantDomainTTLSeg) {
+        return $script:LabTenantDomainCache
+    }
+
+    try {
+        $orgs = @(Get-MgOrganization -ErrorAction Stop)
+        if ($orgs.Count -eq 0) { return $null }
+        $org = $orgs[0]
+
+        $dominio = $null
+        if ($org.PSObject.Properties['VerifiedDomains'] -and $null -ne $org.VerifiedDomains) {
+            foreach ($vd in @($org.VerifiedDomains)) {
+                if ($vd.PSObject.Properties['IsDefault'] -and $vd.IsDefault -and
+                    $vd.PSObject.Properties['Name'] -and -not [string]::IsNullOrWhiteSpace($vd.Name)) {
+                    $dominio = $vd.Name
+                    break
+                }
+            }
+            if ([string]::IsNullOrWhiteSpace($dominio)) {
+                foreach ($vd in @($org.VerifiedDomains)) {
+                    if ($vd.PSObject.Properties['Name'] -and -not [string]::IsNullOrWhiteSpace($vd.Name) -and
+                        ($vd.Name -match '\.onmicrosoft\.com$')) {
+                        $dominio = $vd.Name
+                        break
+                    }
+                }
+            }
+            if ([string]::IsNullOrWhiteSpace($dominio)) {
+                foreach ($vd in @($org.VerifiedDomains)) {
+                    if ($vd.PSObject.Properties['Name'] -and -not [string]::IsNullOrWhiteSpace($vd.Name)) {
+                        $dominio = $vd.Name
+                        break
+                    }
+                }
+            }
+        }
+
+        if (-not [string]::IsNullOrWhiteSpace($dominio)) {
+            $script:LabTenantDomainCache     = $dominio
+            $script:LabTenantDomainTimestamp = $ahora
+        }
+        return $dominio
+    } catch {
+        Clear-LabTenantDomainCache
+        return $null
+    }
+}
+
+function Get-LabGraphNivelRealStatus {
+    <#
+    .SYNOPSIS
+        Devuelve el nivel real del tenant con estado detallado.
+    .DESCRIPTION
+        Esta es la función de lib_graph. No debe colisionar con
+        Get-LabNivelRealDelTenantStatus de lib_niveles (que la orquesta).
+    .OUTPUTS
+        PSCustomObject con Estado, Nivel y Mensaje.
+    #>
+    if (-not (Test-LabGraphSession)) {
+        return [pscustomobject]@{ Estado = 'SinSesion'; Nivel = 'Free'; Mensaje = 'No hay sesión de Graph activa.' }
+    }
+
+    try {
+        $skus = @(Get-LabSubscribedSku)
+    } catch {
+        $msg = $_.Exception.Message
+        if ($msg -match '403|Forbidden|Authorization_RequestDenied|Insufficient privileges') {
+            return [pscustomobject]@{
+                Estado  = 'SinPermisos'
+                Nivel   = 'Free'
+                Mensaje = 'La aplicación no tiene permisos para leer SKUs (Organization.Read.All / Directory.Read.All).'
+            }
+        }
+        return [pscustomobject]@{
+            Estado  = 'Error'
+            Nivel   = 'Free'
+            Mensaje = "No se pudieron consultar los SKUs del tenant: $msg"
+        }
+    }
+
+    $tieneP1 = $false
+    $tieneP2 = $false
+    foreach ($sku in $skus) {
+        if (-not $sku.PSObject.Properties['ServicePlans'] -or $null -eq $sku.ServicePlans) { continue }
+        foreach ($plan in @($sku.ServicePlans)) {
+            if ($plan.ProvisioningStatus -ne 'Success') { continue }
+            if ($plan.ServicePlanName -eq 'AAD_PREMIUM')    { $tieneP1 = $true }
+            if ($plan.ServicePlanName -eq 'AAD_PREMIUM_P2') { $tieneP2 = $true }
+        }
+    }
+
+    if ($tieneP2) {
+        return [pscustomobject]@{ Estado = 'Ok'; Nivel = 'P2'; Mensaje = $null }
+    }
+    if ($tieneP1) {
+        return [pscustomobject]@{ Estado = 'Ok'; Nivel = 'P1'; Mensaje = $null }
+    }
+    return [pscustomobject]@{ Estado = 'SinLicencia'; Nivel = 'Free'; Mensaje = 'El tenant no tiene licencias P1 ni P2 provisionadas.' }
 }
 
 # ============================================================
@@ -277,8 +464,6 @@ function Get-LabAvailableCertificates {
     <#
     .SYNOPSIS
         Devuelve los certificados con clave privada de Cert:\CurrentUser\My.
-    .OUTPUTS
-        Array de X509Certificate2, ordenado por NotAfter.
     #>
     $store = 'Cert:\CurrentUser\My'
     if (-not (Test-Path -Path $store)) { return @() }
@@ -294,12 +479,6 @@ function Import-LabPfxCertificate {
     <#
     .SYNOPSIS
         Pide una ruta .pfx, la importa a Cert:\CurrentUser\My y devuelve el certificado.
-    .DESCRIPTION
-        Si el .pfx tiene contraseña, se pide con Read-Host -AsSecureString.
-        Se importa con Import-PfxCertificate, que deja el certificado en el
-        store del usuario actual con su clave privada.
-    .OUTPUTS
-        El objeto X509Certificate2 importado, o $null si falla.
     #>
     param(
         [string]$Ruta = $null,
@@ -350,21 +529,6 @@ function Invoke-LabGraphWithRetry {
     <#
     .SYNOPSIS
         Ejecuta un bloque de código con reintentos y backoff para 429/503.
-    .DESCRIPTION
-        Si la sesión no está activa, reconecta con los datos App-Only.
-        Si la llamada falla con 429 (Too Many Requests) o 503 (Service
-        Unavailable), espera con backoff exponencial y reintenta hasta
-        LabGraphRetryMaxIntentos.
-    .PARAMETER ScriptBlock
-        Bloque de código a ejecutar.
-    .PARAMETER ClientId
-        ClientId para la reconexión.
-    .PARAMETER TenantId
-        TenantId para la reconexión.
-    .PARAMETER CertificateThumbprint
-        Thumbprint del certificado para la reconexión.
-    .OUTPUTS
-        Resultado del scriptblock, o $null si falla tras los reintentos.
     #>
     param(
         [Parameter(Mandatory = $true)]
@@ -400,6 +564,12 @@ function Invoke-LabGraphWithRetry {
             return (& $ScriptBlock)
         } catch {
             $msg = $_.Exception.Message
+
+            if ($msg -match 'Authorization_RequestDenied|Insufficient privileges|Forbidden') {
+                Write-LabError 'Fallo de permisos: La aplicación no tiene los permisos necesarios en Azure o falta el consentimiento de administrador.'
+                throw
+            }
+
             $esTransitorio = ($msg -match '429|503|504|Too Many Requests|Service Unavailable|throttl')
 
             if (-not $esTransitorio -or $intento -ge $script:LabGraphRetryMaxIntentos) {

@@ -1,0 +1,12 @@
+{
+  "nombre": "manual_20261112_113558",
+  "version": "1.0",
+  "invitados": [
+    {
+      "email": "prueba@lab.grexid.eu",
+      "displayName": "prueba",
+      "redirectUrl": "https://myapplications.microsoft.com",
+      "sendMessage": false
+    }
+  ]
+}

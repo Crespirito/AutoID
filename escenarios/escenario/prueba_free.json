@@ -1,87 +1,33 @@
 {
   "nombre": "prueba_free",
-  "descripcion": "Escenario Free completo.",
+  "descripcion": "Entorno de prueba basico con usuarios y grupos",
   "version": "1.0",
   "usuarios": [
     {
-      "displayName": "Lucia Garcia",
-      "upn": "lucia.g@{tenant}",
-      "mailNickname": "lucia.g",
-      "department": "Ventas",
-      "jobTitle": "Comercial"
+      "displayName": "Juan Perez",
+      "upn": "juan.perez@{tenant}",
+      "mailNickname": "juan.perez",
+      "department": "TI"
     },
     {
-      "displayName": "Javier Martinez",
-      "upn": "javier.m@{tenant}",
-      "mailNickname": "javier.m",
-      "department": "IT",
-      "jobTitle": "Administrador de Sistemas"
+      "displayName": "Maria Lopez",
+      "upn": "maria.lopez@{tenant}",
+      "mailNickname": "maria.lopez",
+      "department": "Ventas"
     }
   ],
   "grupos": [
     {
-      "displayName": "Departamento de Ventas",
-      "description": "Usuarios del departamento de Ventas",
-      "mailNickname": "departamento-ventas"
-    },
-    {
-      "displayName": "Departamento de IT",
-      "description": "Usuarios del departamento de IT",
-      "mailNickname": "departamento-it"
+      "displayName": "Grupo de Prueba",
+      "description": "Grupo basico para el laboratorio",
+      "mailNickname": "GrupoPrueba"
     }
   ],
   "relaciones": [
     {
       "tipo": "membresia",
-      "usuario": "lucia.g@{tenant}",
-      "grupo": "Departamento de Ventas"
-    },
-    {
-      "tipo": "membresia",
-      "usuario": "javier.m@{tenant}",
-      "grupo": "Departamento de IT"
-    }
-  ],
-  "aplicaciones": [
-    {
-      "displayName": "Panel de Analisis Comercial",
-      "description": "Aplicacion interna de analisis",
-      "signInAudience": "AzureADMyOrg",
-      "redirectUris": [ "https://panel.empresa.local/callback" ]
-    }
-  ],
-  "appRoles": [
-    {
-      "aplicacion": "Panel de Analisis Comercial",
-      "displayName": "Administrador",
-      "value": "Admin",
-      "allowedMemberTypes": [ "User" ]
-    },
-    {
-      "aplicacion": "Panel de Analisis Comercial",
-      "value": "Admin",
-      "principal": "lucia.g@{tenant}"
-    }
-  ],
-  "credencialesApp": [
-    {
-      "aplicacion": "Panel de Analisis Comercial",
-      "displayName": "Lab secret",
-      "endDateTime": "2027-01-01T00:00:00"
-    }
-  ],
-  "permisosApi": [
-    {
-      "aplicacion": "Panel de Analisis Comercial",
-      "recurso": "Microsoft Graph",
-      "permiso": "User.Read.All",
-      "tipo": "application"
-    }
-  ],
-  "invitados": [
-    {
-      "email": "invitado.prueba@contoso.com",
-      "displayName": "Invitado Prueba"
+      "usuario": "juan.perez@{tenant}",
+      "grupo": "Grupo de Prueba"
     }
   ]
 }

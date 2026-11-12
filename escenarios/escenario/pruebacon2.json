@@ -1,0 +1,19 @@
+{
+  "nombre": "manual_20261112_114403",
+  "version": "1.0",
+  "invitados": [
+    {
+      "email": "prueba@grexid.ue",
+      "displayName": "prueba",
+      "redirectUrl": "https://myapplications.microsoft.com",
+      "sendMessage": false
+    }
+  ],
+  "usuarios": [
+    {
+      "displayName": "pruebaden",
+      "upn": "pruebaden@grexid.eu",
+      "mailNickname": "pruebaden"
+    }
+  ]
+}
