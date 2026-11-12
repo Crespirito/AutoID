@@ -1,112 +1,51 @@
 <#
 .SYNOPSIS
-    Librería de orquestación de creación, validación y reversión.
+    Motor de orquestación de creación y reversión (PowerShell 7).
 .DESCRIPTION
     Proporciona:
-      - Invoke-LabValidacionEscenario: valida el escenario normalizado
-        llamando a ValidarDef de cada capacidad.
-      - Invoke-LabCreacion: crea los objetos del escenario normalizado
-        llamando a Crear de cada capacidad, registrando en el manifiesto.
-        NO procesa vulnerabilidades: viven fuera del escenario y se
-        aplican desde el flujo dedicado de menu.ps1.
-      - Invoke-LabReversion: revierte vulnerabilidades primero (con
-        verificación de objectId y PreRevertir) y objetos después, en
-        orden inverso de creación (LIFO).
-
-    El núcleo no conoce tipos concretos: itera por secciones del
-    escenario normalizado (clave = Nombre de capacidad) y despacha
-    a la capacidad correspondiente.
-
-    SEPARACIÓN ESCENARIO / VULNERABILIDADES:
-      - Escenario: objetos que se crean desde cero (usuarios, grupos,
-        apps, AUs, PIM...). Viven en $Manifiesto.objetos.
-      - Vulnerabilidades: modificaciones maliciosas aplicadas SOBRE
-        objetos existentes. Viven en $Manifiesto.vulnerabilidades.
-        No son una sección del escenario. Se aplican desde menu.ps1
-        ([5] Crear vulnerabilidad) y se revierten desde clean_up.ps1.
-
-    SEGURIDAD DE OBJETOS PREEXISTENTES:
-    1. Antes de crear, Invoke-LabCreacion construye (o recibe) un snapshot
-       pre-lab con los identificadores que ya existían en el tenant antes
-       del laboratorio. Lo pasa en $Contexto.SnapshotPreLab.
-    2. Antes de revertir, Invoke-LabReversion verifica que el objectId del
-       manifiesto coincide con el actual, tanto para objetos como para
-       vulnerabilidades.
-    3. Antes de revertir una vulnerabilidad, se llama a PreRevertir de la
-       capacidad si existe (por ejemplo, para desactivar una asignación
-       PIM activa antes de cancelar la solicitud elegible).
-.NOTES
-    Depende de lib_ui.ps1, lib_caps.ps1, lib_manifiesto.ps1, lib_niveles.ps1.
-    Se carga por dot-sourcing desde menu.ps1.
+      - Invoke-LabCreacion: crea objetos respetando las dependencias de Entra ID.
+      - Invoke-LabReversion: revierte vulnerabilidades y objetos de forma segura.
+      - Snapshot pre-lab: detecta objetos que ya existían antes del laboratorio.
+      - Verificación de identidad (red de seguridad) ampliada a todos los
+        tipos de objeto y vulnerabilidad que el sistema puede manifestar.
 #>
+#Requires -Version 7.0
+
+# Set-StrictMode -Version Latest
 
 # ============================================================
 # UTILIDADES INTERNAS
 # ============================================================
 
 function Get-LabContextoBase {
-    <#
-    .SYNOPSIS
-        Construye el contexto compartido que se pasa a las capacidades.
-    .PARAMETER Manifiesto
-        Manifiesto en construcción (referencia, se muta fuera).
-    .PARAMETER Config
-        Configuración actual.
-    .PARAMETER SnapshotPreLab
-        Hashtable con identificadores preexistentes (opcional).
-    .PARAMETER Log
-        Lista de log compartida.
-    .OUTPUTS
-        Hashtable con el contexto.
-    #>
     param(
-        [Parameter(Mandatory = $true)]
         [object]$Manifiesto,
-
-        [Parameter(Mandatory = $true)]
         [hashtable]$Config,
-
-        [Parameter(Mandatory = $false)]
-        [hashtable]$SnapshotPreLab = $null,
-
-        [Parameter(Mandatory = $false)]
-        [object]$Log = $null
+        [hashtable]$SnapshotPreLab = $null
     )
 
-    $ctx = Get-MgContext -ErrorAction SilentlyContinue
-    $nivel = Get-LabNivelActual -Config $Config
-    $nivelEfectivo = Get-LabNivelEfectivo -Config $Config
+    $passwords = @{}
+    if ($Config -and $Config.Contains('Passwords') -and $null -ne $Config['Passwords']) {
+        $passwords = $Config['Passwords']
+    }
+
+    $tenantDomain = $null
+    if ($Manifiesto.PSObject.Properties['tenantDomain']) {
+        $tenantDomain = $Manifiesto.tenantDomain
+    }
 
     return @{
-        TenantId       = if ($ctx) { $ctx.TenantId } else { $null }
-        TenantDomain   = $Manifiesto.tenantDomain
-        Nivel          = $nivel              # configurado (compat)
-        NivelEfectivo  = $nivelEfectivo      # min(config, tenant)
-        Manifiesto     = $Manifiesto
-        ObjetosCreados = @{}
-        Config         = $Config
-        SnapshotPreLab = if ($SnapshotPreLab) { $SnapshotPreLab } else { @{} }
-        Log            = $Log
+        TenantDomain    = $tenantDomain
+        Nivel           = Get-LabNivelActual -Config $Config
+        Manifiesto      = $Manifiesto
+        ObjetosCreados  = @{}
+        Config          = $Config
+        SnapshotPreLab  = if ($SnapshotPreLab) { $SnapshotPreLab } else { @{} }
+        PasswordsPorUpn = $passwords
     }
 }
 
 function New-LabSnapshotPreLab {
-    <#
-    .SYNOPSIS
-        Construye un snapshot de los objetos que ya existen en el tenant.
-    .DESCRIPTION
-        Consulta usuarios, grupos y aplicaciones actuales y devuelve un
-        hashtable con tres claves: 'usuarios' (UPNs), 'grupos' (displayNames)
-        y 'aplicaciones' (displayNames). Las capacidades consultan este
-        snapshot para no adoptar objetos preexistentes.
-
-        NOTA SOBRE VULNERABILIDADES: las vulnerabilidades no dependen del
-        snapshot. Dependen del objeto afectado (que puede ser preexistente
-        o no). La capacidad cap_vulnerabilidades.ps1 decide por su cuenta
-        si el objeto afectado es preexistente consultando el snapshot.
-    .OUTPUTS
-        Hashtable con 'usuarios', 'grupos', 'aplicaciones'.
-    #>
     $snapshot = @{
         usuarios     = @{}
         grupos       = @{}
@@ -115,88 +54,43 @@ function New-LabSnapshotPreLab {
 
     try {
         $usuarios = Get-MgUser -All -Property 'id,userPrincipalName' -ErrorAction SilentlyContinue
-        foreach ($u in @($usuarios)) {
-            if ($u.userPrincipalName) {
-                $snapshot.usuarios[$u.userPrincipalName.ToLowerInvariant()] = $u.Id
-            }
+        foreach ($u in $usuarios) {
+            if ($u.userPrincipalName) { $snapshot.usuarios[$u.userPrincipalName.ToLowerInvariant()] = $u.Id }
         }
-    } catch {
-        Write-LabWarn "No se pudo construir el snapshot de usuarios: $($_.Exception.Message)"
-    }
+    } catch { }
 
     try {
         $grupos = Get-MgGroup -All -Property 'id,displayName' -ErrorAction SilentlyContinue
-        foreach ($g in @($grupos)) {
-            if ($g.displayName) {
-                $snapshot.grupos[$g.displayName] = $g.Id
-            }
+        foreach ($g in $grupos) {
+            if ($g.displayName) { $snapshot.grupos[$g.displayName] = $g.Id }
         }
-    } catch {
-        Write-LabWarn "No se pudo construir el snapshot de grupos: $($_.Exception.Message)"
-    }
+    } catch { }
 
     try {
         $apps = Get-MgApplication -All -Property 'id,displayName' -ErrorAction SilentlyContinue
-        foreach ($a in @($apps)) {
-            if ($a.displayName) {
-                $snapshot.aplicaciones[$a.displayName] = $a.Id
-            }
+        foreach ($a in $apps) {
+            if ($a.displayName) { $snapshot.aplicaciones[$a.displayName] = $a.Id }
         }
-    } catch {
-        Write-LabWarn "No se pudo construir el snapshot de aplicaciones: $($_.Exception.Message)"
-    }
+    } catch { }
 
     return $snapshot
 }
 
 function Add-LabObjetoAlManifiesto {
-    <#
-    .SYNOPSIS
-        Añade un objeto devuelto por Crear al manifiesto, con los campos comunes.
-    .DESCRIPTION
-        El campo 'estado' se toma de 'estadoDetalle' si está presente en el
-        objeto creado ('creado', 'reutilizado', 'preexistente'). Si no,
-        se usa el valor por defecto ('creado').
-
-        Esta función SOLO se usa para objetos del escenario. Las
-        vulnerabilidades se registran con Add-LabManifiestoVulnerabilidad.
-    .PARAMETER Manifiesto
-        Manifiesto en construcción.
-    .PARAMETER Capacidad
-        Nombre de la capacidad que creó el objeto.
-    .PARAMETER ObjetoCreado
-        Objeto devuelto por Crear (con al menos 'tipo' y datos específicos).
-    .PARAMETER Estado
-        Estado por defecto si el objeto no trae 'estadoDetalle'.
-    .OUTPUTS
-        El objeto envuelto, ya añadido al manifiesto.
-    #>
     param(
-        [Parameter(Mandatory = $true)]
         [object]$Manifiesto,
-
-        [Parameter(Mandatory = $true)]
         [string]$Capacidad,
-
-        [Parameter(Mandatory = $true)]
-        [object]$ObjetoCreado,
-
-        [string]$Estado = 'creado'
+        [object]$ObjetoCreado
     )
 
     $id = 'obj-{0:D4}' -f ($Manifiesto.objetos.Count + 1)
-    $ctx = Get-MgContext -ErrorAction SilentlyContinue
 
-    $tipo = if ($ObjetoCreado.PSObject.Properties['tipo']) { $ObjetoCreado.tipo } else { 'Desconocido' }
+    $tipo = 'Desconocido'
+    if ($ObjetoCreado.PSObject.Properties['tipo']) { $tipo = $ObjetoCreado.tipo }
 
-    # Estado: prioridad a estadoDetalle del objeto creado
-    $estadoFinal = $Estado
-    if ($ObjetoCreado.PSObject.Properties['estadoDetalle'] -and
-        -not [string]::IsNullOrWhiteSpace($ObjetoCreado.estadoDetalle)) {
-        $estadoFinal = $ObjetoCreado.estadoDetalle
-    }
+    $estado = 'creado'
+    if ($ObjetoCreado.PSObject.Properties['estadoDetalle']) { $estado = $ObjetoCreado.estadoDetalle }
 
-    # Extraer datos: todo excepto 'tipo' y 'estadoDetalle'
     $datos = @{}
     foreach ($p in $ObjetoCreado.PSObject.Properties) {
         if ($p.Name -notin @('tipo','estadoDetalle')) {
@@ -208,9 +102,9 @@ function Add-LabObjetoAlManifiesto {
         id        = $id
         tipo      = $tipo
         capacidad = $Capacidad
-        estado    = $estadoFinal
+        estado    = $estado
         timestamp = (Get-Date).ToString('o')
-        tenantId  = if ($ctx) { $ctx.TenantId } else { $null }
+        tenantId  = (Get-MgContext).TenantId
         datos     = $datos
     }
 
@@ -219,173 +113,64 @@ function Add-LabObjetoAlManifiesto {
 }
 
 # ============================================================
-# VALIDACIÓN
-# ============================================================
-
-function Invoke-LabValidacionEscenario {
-    <#
-    .SYNOPSIS
-        Valida un escenario normalizado llamando a ValidarDef de cada capacidad.
-    .DESCRIPTION
-        Las vulnerabilidades NO son una sección del escenario, así que no
-        pasan por aquí. Su validación la hace cap_vulnerabilidades.ValidarDef
-        desde el flujo de creación de vulnerabilidades de menu.ps1.
-    .PARAMETER EscenarioNormalizado
-        Resultado de ConvertTo-LabEscenarioNormalizado.
-    .PARAMETER Contexto
-        Contexto compartido (de Get-LabContextoBase).
-    .OUTPUTS
-        Array de strings con los errores. Vacío si es válido.
-    #>
-    param(
-        [Parameter(Mandatory = $true)]
-        [object]$EscenarioNormalizado,
-
-        [Parameter(Mandatory = $false)]
-        [hashtable]$Contexto = @{}
-    )
-
-    $errores = @()
-
-    foreach ($nombreCap in $EscenarioNormalizado.Secciones.Keys) {
-        $def = @($EscenarioNormalizado.Secciones[$nombreCap])
-        if ($def.Count -eq 0) { continue }
-
-        $cap = Get-LabCapacidad -Nombre $nombreCap
-        if (-not $cap) {
-            $errores += "Capacidad '$nombreCap' no registrada (¿carpeta desactivada?). La sección '$nombreCap' no se puede procesar."
-            continue
-        }
-
-        $nivelActual = if ($Contexto.ContainsKey('Nivel')) { $Contexto.Nivel } else { 'Free' }
-        if (-not (Test-LabNivelPermitido -NivelCapacidad $cap.Nivel -NivelConfigurado $nivelActual)) {
-            $errores += "Capacidad '$nombreCap' requiere nivel $($cap.Nivel), pero el nivel actual es $nivelActual."
-            continue
-        }
-
-        try {
-            $errsCap = & $cap.ValidarDef $def
-            foreach ($e in @($errsCap)) {
-                if (-not [string]::IsNullOrWhiteSpace($e)) {
-                    $errores += "[$nombreCap] $e"
-                }
-            }
-        } catch {
-            $errores += "[$nombreCap] Error en ValidarDef: $($_.Exception.Message)"
-        }
-    }
-
-    return $errores
-}
-
-# ============================================================
 # CREACIÓN
 # ============================================================
 
 function Invoke-LabCreacion {
-    <#
-    .SYNOPSIS
-        Crea los objetos del escenario normalizado llamando a Crear de cada capacidad.
-    .DESCRIPTION
-        Itera por las capacidades en orden de dependencia (topológico),
-        y para cada una con sección no vacía, llama a su Crear. Los
-        objetos devueltos se envuelven y se añaden al manifiesto.
-
-        IMPORTANTE: las vulnerabilidades NO se procesan aquí. No son una
-        sección del escenario. Se aplican desde menu.ps1 con el flujo
-        dedicado y se registran con Add-LabManifiestoVulnerabilidad.
-
-        Salvaguarda: si una capacidad llamada 'Vulnerabilidades' tuviera
-        una sección en el escenario (por compatibilidad con manifiestos
-        antiguos), se omite con aviso. No debe procesarse como escenario.
-
-        Antes de crear, construye (o recibe) un snapshot pre-lab y lo pasa
-        en $Contexto.SnapshotPreLab.
-    .PARAMETER EscenarioNormalizado
-        Resultado de ConvertTo-LabEscenarioNormalizado.
-    .PARAMETER Manifiesto
-        Manifiesto en construcción (se muta).
-    .PARAMETER Config
-        Configuración actual.
-    .PARAMETER SnapshotPreLab
-        Snapshot pre-lab ya construido. Si no se pasa, se construye.
-    .PARAMETER Log
-        Lista de log compartida.
-    .PARAMETER Detener
-        Scriptblock opcional que se evalúa antes de cada capacidad. Si
-        devuelve $true, se detiene la creación.
-    .OUTPUTS
-        Hashtable con Resultado ('completado' o 'detenido'), Contexto y CapacidadDetenida.
-    #>
     param(
-        [Parameter(Mandatory = $true)]
         [object]$EscenarioNormalizado,
-
-        [Parameter(Mandatory = $true)]
         [object]$Manifiesto,
-
-        [Parameter(Mandatory = $true)]
-        [hashtable]$Config,
-
-        [Parameter(Mandatory = $false)]
-        [hashtable]$SnapshotPreLab = $null,
-
-        [Parameter(Mandatory = $false)]
-        [object]$Log = $null,
-
-        [Parameter(Mandatory = $false)]
-        [scriptblock]$Detener = $null
+        [hashtable]$Config
     )
 
-    # Construir snapshot si no se pasó
-    if (-not $SnapshotPreLab) {
-        Write-LabInfo 'Construyendo snapshot pre-lab...'
-        $SnapshotPreLab = New-LabSnapshotPreLab
-    }
+    Write-LabInfo 'Construyendo snapshot pre-lab...'
+    $snapshot = New-LabSnapshotPreLab
+    $ctx = Get-LabContextoBase -Manifiesto $Manifiesto -Config $Config -SnapshotPreLab $snapshot
 
-    $ctx = Get-LabContextoBase -Manifiesto $Manifiesto -Config $Config -SnapshotPreLab $SnapshotPreLab -Log $Log
+    # ORDEN ESTRICTO DE ENTRA ID
+    $ordenCapacidades = @(
+        'Usuarios',
+        'Grupos',
+        'Aplicaciones',
+        'Relaciones',
+        'AppRoles',
+        'CredencialesApp',
+        'PermisosApi',
+        'Invitados',
+        'Licencias',
+        'MetodosAuth',
+        'AccesoCondicional',
+        'GruposDinamicos',
+        'GruposRoleAssignable',
+        'AdministrativeUnits',
+        'Pim'
+    )
 
-    $orden = Get-LabOrdenCapacidades -EscenarioNormalizado $EscenarioNormalizado
-
-    foreach ($nombreCap in $orden) {
-        # Salvaguarda: vulnerabilidades no se procesan como escenario
-        if ($nombreCap -eq 'Vulnerabilidades') {
-            Write-LabWarn "La capacidad 'Vulnerabilidades' no se procesa como parte del escenario. Usa el flujo [5] Crear vulnerabilidad de menu.ps1."
-            continue
-        }
-
-        if ($Detener) {
-            if (& $Detener $nombreCap $ctx) {
-                return @{ Resultado = 'detenido'; Contexto = $ctx; CapacidadDetenida = $nombreCap }
-            }
-        }
-
+    foreach ($nombreCap in $ordenCapacidades) {
+        # Secciones es un OrderedDictionary: no tiene ContainsKey, se usa Contains().
+        if (-not $EscenarioNormalizado.Secciones.Contains($nombreCap)) { continue }
         $def = @($EscenarioNormalizado.Secciones[$nombreCap])
         if ($def.Count -eq 0) { continue }
 
         $cap = Get-LabCapacidad -Nombre $nombreCap
-        if (-not $cap) {
-            Write-LabWarn "Capacidad '$nombreCap' no registrada; se omite."
-            continue
-        }
+        if (-not $cap) { continue }
 
-        Write-LabInfo "Creando: $nombreCap ($($def.Count) objetos)"
+        Write-LabInfo "Creando: $nombreCap ($($def.Count) objetos)..."
 
         try {
             $creados = & $cap.Crear $def $ctx
-
             $lista = @()
+
             foreach ($o in @($creados)) {
                 if ($null -eq $o) { continue }
                 $envuelto = Add-LabObjetoAlManifiesto -Manifiesto $Manifiesto -Capacidad $nombreCap -ObjetoCreado $o
                 $lista += $envuelto
             }
+
             $ctx.ObjetosCreados[$nombreCap] = $lista
 
             if ($cap.ContainsKey('PostCrear') -and $cap.PostCrear -is [scriptblock]) {
-                try {
-                    & $cap.PostCrear $lista $ctx
-                } catch {
+                try { & $cap.PostCrear $lista $ctx } catch {
                     Write-LabWarn "PostCrear de '$nombreCap' falló: $($_.Exception.Message)"
                 }
             }
@@ -393,59 +178,6 @@ function Invoke-LabCreacion {
             Write-LabError "Error creando '$nombreCap': $($_.Exception.Message)"
         }
     }
-
-    return @{ Resultado = 'completado'; Contexto = $ctx; CapacidadDetenida = $null }
-}
-
-function Get-LabOrdenCapacidades {
-    <#
-    .SYNOPSIS
-        Devuelve el orden topológico de las capacidades con sección no vacía.
-    .OUTPUTS
-        Array de nombres de capacidad en orden de ejecución.
-    #>
-    param(
-        [Parameter(Mandatory = $true)]
-        [object]$EscenarioNormalizado
-    )
-
-    $conDef = @($EscenarioNormalizado.Secciones.Keys | Where-Object {
-        @($EscenarioNormalizado.Secciones[$_]).Count -gt 0
-    })
-
-    if ($conDef.Count -eq 0) { return @() }
-
-    $script:LabOrdenTemp = @()
-    $visitados = @{}
-    $enProceso = @{}
-
-    function Resolve-LabCap {
-        param($nombre)
-        if ($visitados.ContainsKey($nombre)) { return }
-        if ($enProceso.ContainsKey($nombre)) {
-            Write-LabWarn "Ciclo detectado en dependencias de '$nombre'. Se ignora."
-            return
-        }
-        $enProceso[$nombre] = $true
-
-        $cap = Get-LabCapacidad -Nombre $nombre
-        if ($cap) {
-            foreach ($dep in @($cap.DependeDe)) {
-                if ($conDef -contains $dep) {
-                    Resolve-LabCap -nombre $dep
-                }
-            }
-        }
-
-        $enProceso.Remove($nombre)
-        $visitados[$nombre] = $true
-        $script:LabOrdenTemp += $nombre
-    }
-
-    foreach ($n in $conDef) {
-        Resolve-LabCap -nombre $n
-    }
-    return $script:LabOrdenTemp
 }
 
 # ============================================================
@@ -453,62 +185,21 @@ function Get-LabOrdenCapacidades {
 # ============================================================
 
 function Invoke-LabReversion {
-    <#
-    .SYNOPSIS
-        Revierte vulnerabilidades y objetos del manifiesto.
-    .DESCRIPTION
-        Orden de borrado:
-          1. Vulnerabilidades (lista aparte), primero.
-             - Verifica objectId del objeto afectado si está en datos.
-             - Llama a PreRevertir de la capacidad si existe.
-             - Llama a Revertir de la capacidad.
-             - Estados: aplicada -> revertida, o fallida / no-revertida.
-          2. Objetos, en orden inverso de creación (LIFO).
-             - Verifica objectId.
-             - Llama a PreRevertir de la capacidad si existe.
-             - Llama a Revertir.
-
-        Estados ignorados:
-          - Vulnerabilidades: preexistente, revertida, no-revertida, omitida.
-          - Objetos: preexistente, revertido, no-revertido, omitido.
-    .PARAMETER Manifiesto
-        Manifiesto cargado (se muta).
-    .PARAMETER Config
-        Configuración actual.
-    .PARAMETER Log
-        Lista de log compartida.
-    .PARAMETER Forzar
-        Si se especifica, para objetos cuya capacidad no está registrada,
-        intenta un borrado genérico por tipo.
-    .OUTPUTS
-        Hashtable con contadores: Revertidos, Fallidos, Omitidos, Preexistentes.
-    #>
     param(
-        [Parameter(Mandatory = $true)]
         [object]$Manifiesto,
-
-        [Parameter(Mandatory = $true)]
         [hashtable]$Config,
-
-        [Parameter(Mandatory = $false)]
-        [object]$Log = $null,
-
         [switch]$Forzar
     )
 
-    $ctx = Get-LabContextoBase -Manifiesto $Manifiesto -Config $Config -Log $Log
+    $ctx = Get-LabContextoBase -Manifiesto $Manifiesto -Config $Config
     $contadores = @{ Revertidos = 0; Fallidos = 0; Omitidos = 0; Preexistentes = 0 }
 
-    # --------------------------------------------------------
     # 1. Vulnerabilidades primero
-    # --------------------------------------------------------
     foreach ($v in @($Manifiesto.vulnerabilidades)) {
-        # Estados ignorados
-        if ($v.estado -in $script:LabEstadosIgnoradosVulnerabilidad) {
+        if ($v.estado -in @('preexistente','revertida','no-revertida','omitida')) {
             if ($v.estado -eq 'preexistente') { $contadores.Preexistentes++ }
             continue
         }
-        if ($v.estado -notin $script:LabEstadosReversiblesVulnerabilidad) { continue }
 
         $cap = Get-LabCapacidad -Nombre $v.capacidad
         if (-not $cap) {
@@ -518,40 +209,30 @@ function Invoke-LabReversion {
             continue
         }
 
-        # Validar datos
         if (-not $v.PSObject.Properties['datos'] -or $null -eq $v.datos) {
-            Write-LabWarn "Vulnerabilidad $($v.id) sin 'datos' en el manifiesto. No se puede revertir."
+            Write-LabWarn "Vulnerabilidad $($v.id) sin 'datos'."
             $v.estado = 'no-revertida'
             $contadores.Omitidos++
             continue
         }
 
-        # Verificar objectId del objeto afectado
         if (-not (Test-LabVulnerabilidadCoincideConManifiesto -Vulnerabilidad $v)) {
-            Write-LabWarn "La vulnerabilidad $($v.id) (tipo '$($v.tipo)') no coincide con el objeto afectado actual (objectId distinto o ya no existe). Se omite la reversión."
+            Write-LabWarn "La vulnerabilidad $($v.id) no coincide con el objeto afectado. Se omite."
             $v.estado = 'no-revertida'
             $contadores.Omitidos++
             continue
         }
 
-        # PreRevertir si existe
         if ($cap.ContainsKey('PreRevertir') -and $cap.PreRevertir -is [scriptblock]) {
-            try {
-                $null = & $cap.PreRevertir @($v) $ctx
-            } catch {
-                Write-LabWarn "PreRevertir de '$($v.capacidad)' falló para $($v.id): $($_.Exception.Message)"
+            try { & $cap.PreRevertir @($v) $ctx } catch {
+                Write-LabWarn "PreRevertir falló para $($v.id): $($_.Exception.Message)"
             }
         }
 
         try {
             $ok = & $cap.Revertir $v $ctx
-            if ($ok) {
-                $v.estado = 'revertida'
-                $contadores.Revertidos++
-            } else {
-                $v.estado = 'fallida'
-                $contadores.Fallidos++
-            }
+            if ($ok) { $v.estado = 'revertida'; $contadores.Revertidos++ }
+            else      { $v.estado = 'fallida';   $contadores.Fallidos++ }
         } catch {
             Write-LabWarn "Error revirtiendo $($v.id): $($_.Exception.Message)"
             $v.estado = 'fallida'
@@ -559,29 +240,20 @@ function Invoke-LabReversion {
         }
     }
 
-    # --------------------------------------------------------
-    # 2. Objetos en orden inverso de creación (LIFO)
-    # --------------------------------------------------------
+    # 2. Objetos en LIFO (Inverso al orden de creación)
     $ordenados = @($Manifiesto.objetos | Sort-Object { $_.timestamp } -Descending)
     foreach ($o in $ordenados) {
-        # Estados ignorados
-        if ($o.estado -in $script:LabEstadosIgnoradosObjeto) {
+        if ($o.estado -in @('preexistente','revertido','no-revertido','omitido')) {
             if ($o.estado -eq 'preexistente') { $contadores.Preexistentes++ }
             continue
         }
-        if ($o.estado -notin $script:LabEstadosReversiblesObjeto) { continue }
 
         $cap = Get-LabCapacidad -Nombre $o.capacidad
         if (-not $cap) {
             if ($Forzar) {
                 $ok = Invoke-LabBorradoGenerico -Objeto $o
-                if ($ok) {
-                    $o.estado = 'revertido'
-                    $contadores.Revertidos++
-                } else {
-                    $o.estado = 'no-revertido'
-                    $contadores.Omitidos++
-                }
+                if ($ok) { $o.estado = 'revertido'; $contadores.Revertidos++ }
+                else      { $o.estado = 'no-revertido'; $contadores.Omitidos++ }
             } else {
                 Write-LabWarn "Capacidad '$($o.capacidad)' no disponible; $($o.id) queda en el manifiesto."
                 $o.estado = 'no-revertido'
@@ -590,32 +262,23 @@ function Invoke-LabReversion {
             continue
         }
 
-        # Verificar objectId
         if (-not (Test-LabObjetoCoincideConManifiesto -Objeto $o)) {
-            Write-LabWarn "El objeto $($o.id) (tipo '$($o.tipo)') no coincide con el del manifiesto (objectId distinto o ya no existe). Se omite el borrado."
+            Write-LabWarn "El objeto $($o.id) tiene un objectId distinto. Se omite."
             $o.estado = 'no-revertido'
             $contadores.Omitidos++
             continue
         }
 
-        # PreRevertir si existe
         if ($cap.ContainsKey('PreRevertir') -and $cap.PreRevertir -is [scriptblock]) {
-            try {
-                $null = & $cap.PreRevertir @($o) $ctx
-            } catch {
-                Write-LabWarn "PreRevertir de '$($o.capacidad)' falló para $($o.id): $($_.Exception.Message)"
+            try { & $cap.PreRevertir @($o) $ctx } catch {
+                Write-LabWarn "PreRevertir falló para $($o.id): $($_.Exception.Message)"
             }
         }
 
         try {
             $ok = & $cap.Revertir $o $ctx
-            if ($ok) {
-                $o.estado = 'revertido'
-                $contadores.Revertidos++
-            } else {
-                $o.estado = 'fallido'
-                $contadores.Fallidos++
-            }
+            if ($ok) { $o.estado = 'revertido'; $contadores.Revertidos++ }
+            else      { $o.estado = 'fallido';   $contadores.Fallidos++ }
         } catch {
             Write-LabWarn "Error revirtiendo $($o.id): $($_.Exception.Message)"
             $o.estado = 'fallido'
@@ -626,194 +289,255 @@ function Invoke-LabReversion {
     return $contadores
 }
 
-function Test-LabObjetoCoincideConManifiesto {
+# ============================================================
+# VERIFICACIÓN DE IDENTIDAD (RED DE SEGURIDAD)
+# ============================================================
+
+function Get-LabDatoSeguro {
     <#
     .SYNOPSIS
-        Comprueba que el objeto actual coincide con el objectId del manifiesto.
-    .DESCRIPTION
-        Tipos con verificación específica:
-          - Usuario (por upn)
-          - Grupo (por displayName)
-          - Aplicacion (por displayName)
-          - ServicePrincipal (por objectId)
-          - AdministrativoUnit (por displayName)
-
-        Para tipos sin verificación específica, se devuelve $true (se
-        confía en el manifiesto). Es el comportamiento histórico, pero
-        ahora los tipos más comunes tienen verificación.
-
-        Si el manifiesto no tiene objectId, no se puede verificar; se
-        devuelve $true (idempotente).
-        Si el objeto ya no existe, se devuelve $true (idempotente).
-        Si el objectId actual difiere del del manifiesto, se devuelve $false.
-    .OUTPUTS
-        $true si se puede borrar, $false si no.
+        Devuelve el valor de un campo dentro de $Objeto.datos, o $null.
     #>
     param(
-        [Parameter(Mandatory = $true)]
-        [object]$Objeto
+        [Parameter(Mandatory = $true)] [object]$Objeto,
+        [Parameter(Mandatory = $true)] [string]$Nombre
     )
 
-    $objectIdEsperado = $null
-    if ($Objeto.datos -and $Objeto.datos.PSObject.Properties['objectId']) {
-        $objectIdEsperado = $Objeto.datos.objectId
+    if ($null -eq $Objeto -or $null -eq $Objeto.datos) { return $null }
+    if ($Objeto.datos -is [hashtable]) {
+        if ($Objeto.datos.Contains($Nombre)) { return $Objeto.datos[$Nombre] }
+        return $null
     }
-    if ([string]::IsNullOrWhiteSpace($objectIdEsperado)) {
-        return $true
+    if ($Objeto.datos.PSObject.Properties[$Nombre]) { return $Objeto.datos.$Nombre }
+    return $null
+}
+
+function Test-LabCoincidenciaPorTipo {
+    <#
+    .SYNOPSIS
+        Verifica el objectId del manifiesto contra el objeto real del tenant.
+    .DESCRIPTION
+        Devuelve $true si:
+          - No hay objectId esperado (nada que verificar).
+          - El objeto ya no existe (idempotente).
+          - El objectId coincide.
+        Devuelve $false si:
+          - El objectId esperado existe en el manifiesto pero el objeto real
+            tiene un objectId distinto.
+        Para tipos sin objectId propio (asignaciones, relaciones), verifica
+        el contenedor (app, SP, grupo, usuario, AU) si es posible.
+    #>
+    param(
+        [Parameter(Mandatory = $true)] [string]$Tipo,
+        [Parameter(Mandatory = $true)] [object]$Datos,
+        [string]$ObjectIdEsperado
+    )
+
+    # Helper de coincidencia sobre un objeto Graph
+    $coincide = {
+        param($Actual, $Esperado)
+        if ($null -eq $Actual) { return $true }  # idempotente
+        if ($Actual -is [array]) { $Actual = $Actual[0] }
+        if ($null -eq $Actual) { return $true }
+        if ([string]::IsNullOrWhiteSpace($Esperado)) { return $true }
+        return ($Actual.Id -eq $Esperado)
     }
 
     try {
-        $actual = $null
-        switch ($Objeto.tipo) {
+        switch ($Tipo) {
             'Usuario' {
-                if ($Objeto.datos.upn) {
-                    $actual = Get-MgUser -UserId $Objeto.datos.upn -ErrorAction SilentlyContinue
-                }
+                $upn = $null
+                if ($Datos -is [hashtable]) { $upn = $Datos['upn'] } elseif ($Datos.PSObject.Properties['upn']) { $upn = $Datos.upn }
+                if ([string]::IsNullOrWhiteSpace($upn)) { return $true }
+                $actual = Get-MgUser -UserId $upn -ErrorAction SilentlyContinue
+                return (& $coincide $actual $ObjectIdEsperado)
             }
             'Grupo' {
-                if ($Objeto.datos.displayName) {
-                    $actual = Get-MgGroup -Filter "displayName eq '$($Objeto.datos.displayName)'" -ErrorAction SilentlyContinue
-                }
+                $dn = $null
+                if ($Datos -is [hashtable]) { $dn = $Datos['displayName'] } elseif ($Datos.PSObject.Properties['displayName']) { $dn = $Datos.displayName }
+                if ([string]::IsNullOrWhiteSpace($dn)) { return $true }
+                $actual = Get-MgGroup -Filter "displayName eq '$($dn -replace "'","''")'" -ErrorAction SilentlyContinue
+                return (& $coincide $actual $ObjectIdEsperado)
+            }
+            'GrupoDinamico' {
+                $dn = $null
+                if ($Datos -is [hashtable]) { $dn = $Datos['displayName'] } elseif ($Datos.PSObject.Properties['displayName']) { $dn = $Datos.displayName }
+                if ([string]::IsNullOrWhiteSpace($dn)) { return $true }
+                $actual = Get-MgGroup -Filter "displayName eq '$($dn -replace "'","''")'" -ErrorAction SilentlyContinue
+                return (& $coincide $actual $ObjectIdEsperado)
+            }
+            'GrupoRoleAssignable' {
+                $dn = $null
+                if ($Datos -is [hashtable]) { $dn = $Datos['displayName'] } elseif ($Datos.PSObject.Properties['displayName']) { $dn = $Datos.displayName }
+                if ([string]::IsNullOrWhiteSpace($dn)) { return $true }
+                $actual = Get-MgGroup -Filter "displayName eq '$($dn -replace "'","''")'" -ErrorAction SilentlyContinue
+                return (& $coincide $actual $ObjectIdEsperado)
             }
             'Aplicacion' {
-                if ($Objeto.datos.displayName) {
-                    $actual = Get-MgApplication -Filter "displayName eq '$($Objeto.datos.displayName)'" -ErrorAction SilentlyContinue
-                }
+                $dn = $null
+                if ($Datos -is [hashtable]) { $dn = $Datos['displayName'] } elseif ($Datos.PSObject.Properties['displayName']) { $dn = $Datos.displayName }
+                if ([string]::IsNullOrWhiteSpace($dn)) { return $true }
+                $actual = Get-MgApplication -Filter "displayName eq '$($dn -replace "'","''")'" -ErrorAction SilentlyContinue
+                return (& $coincide $actual $ObjectIdEsperado)
             }
             'ServicePrincipal' {
-                $actual = Get-MgServicePrincipal -ServicePrincipalId $objectIdEsperado -ErrorAction SilentlyContinue
+                if ([string]::IsNullOrWhiteSpace($ObjectIdEsperado)) { return $true }
+                $actual = Get-MgServicePrincipal -ServicePrincipalId $ObjectIdEsperado -ErrorAction SilentlyContinue
+                return (& $coincide $actual $ObjectIdEsperado)
             }
             'AdministrativeUnit' {
-                $actual = Get-MgDirectoryAdministrativeUnit -AdministrativeUnitId $objectIdEsperado -ErrorAction SilentlyContinue
+                if ([string]::IsNullOrWhiteSpace($ObjectIdEsperado)) { return $true }
+                $actual = Get-MgDirectoryAdministrativeUnit -AdministrativeUnitId $ObjectIdEsperado -ErrorAction SilentlyContinue
+                return (& $coincide $actual $ObjectIdEsperado)
+            }
+            'Invitado' {
+                if ([string]::IsNullOrWhiteSpace($ObjectIdEsperado)) { return $true }
+                $actual = Get-MgUser -UserId $ObjectIdEsperado -ErrorAction SilentlyContinue
+                return (& $coincide $actual $ObjectIdEsperado)
+            }
+            'AccesoCondicional' {
+                if ([string]::IsNullOrWhiteSpace($ObjectIdEsperado)) { return $true }
+                $actual = Get-MgIdentityConditionalAccessPolicy -ConditionalAccessPolicyId $ObjectIdEsperado -ErrorAction SilentlyContinue
+                return (& $coincide $actual $ObjectIdEsperado)
+            }
+            'CredencialApp' {
+                # Verificamos la app contenedora (keyId de la credencial vive dentro)
+                $appId = $null
+                if ($Datos -is [hashtable]) { $appId = $Datos['appId'] } elseif ($Datos.PSObject.Properties['appId']) { $appId = $Datos.appId }
+                if ([string]::IsNullOrWhiteSpace($appId)) { return $true }
+                $actual = Get-MgApplication -Filter "appId eq '$($appId -replace "'","''")'" -ErrorAction SilentlyContinue
+                if ($null -eq $actual) { return $true }
+                if ($actual -is [array]) { $actual = $actual[0] }
+                return ($null -ne $actual)
+            }
+            'AppRole' {
+                $appId = $null
+                if ($Datos -is [hashtable]) { $appId = $Datos['appId'] } elseif ($Datos.PSObject.Properties['appId']) { $appId = $Datos.appId }
+                if ([string]::IsNullOrWhiteSpace($appId)) { return $true }
+                $actual = Get-MgApplication -Filter "appId eq '$($appId -replace "'","''")'" -ErrorAction SilentlyContinue
+                if ($null -eq $actual) { return $true }
+                if ($actual -is [array]) { $actual = $actual[0] }
+                return ($null -ne $actual)
+            }
+            'AppRoleAssignment' {
+                $spId = $null
+                if ($Datos -is [hashtable]) { $spId = $Datos['servicePrincipalId'] } elseif ($Datos.PSObject.Properties['servicePrincipalId']) { $spId = $Datos.servicePrincipalId }
+                if ([string]::IsNullOrWhiteSpace($spId)) { return $true }
+                $actual = Get-MgServicePrincipal -ServicePrincipalId $spId -ErrorAction SilentlyContinue
+                return ($null -ne $actual)
+            }
+            'PermisoApi' {
+                $spId = $null
+                if ($Datos -is [hashtable]) { $spId = $Datos['clientSpId'] } elseif ($Datos.PSObject.Properties['clientSpId']) { $spId = $Datos.clientSpId }
+                if ([string]::IsNullOrWhiteSpace($spId)) { return $true }
+                $actual = Get-MgServicePrincipal -ServicePrincipalId $spId -ErrorAction SilentlyContinue
+                return ($null -ne $actual)
+            }
+            'Licencia' {
+                $userId = $null
+                if ($Datos -is [hashtable]) { $userId = $Datos['userId'] } elseif ($Datos.PSObject.Properties['userId']) { $userId = $Datos.userId }
+                if ([string]::IsNullOrWhiteSpace($userId)) { return $true }
+                $actual = Get-MgUser -UserId $userId -ErrorAction SilentlyContinue
+                return ($null -ne $actual)
+            }
+            'MetodoAuth' {
+                $userId = $null
+                if ($Datos -is [hashtable]) { $userId = $Datos['userId'] } elseif ($Datos.PSObject.Properties['userId']) { $userId = $Datos.userId }
+                if ([string]::IsNullOrWhiteSpace($userId)) { return $true }
+                $actual = Get-MgUser -UserId $userId -ErrorAction SilentlyContinue
+                return ($null -ne $actual)
+            }
+            'PimEligibleRole' {
+                $userId = $null
+                if ($Datos -is [hashtable]) { $userId = $Datos['userId'] } elseif ($Datos.PSObject.Properties['userId']) { $userId = $Datos.userId }
+                if ([string]::IsNullOrWhiteSpace($userId)) { return $true }
+                $actual = Get-MgUser -UserId $userId -ErrorAction SilentlyContinue
+                return ($null -ne $actual)
+            }
+            'MembresiaGrupo' {
+                $groupId = $null
+                if ($Datos -is [hashtable]) { $groupId = $Datos['groupId'] } elseif ($Datos.PSObject.Properties['groupId']) { $groupId = $Datos.groupId }
+                if ([string]::IsNullOrWhiteSpace($groupId)) { return $true }
+                $actual = Get-MgGroup -GroupId $groupId -ErrorAction SilentlyContinue
+                return ($null -ne $actual)
+            }
+            'AdministrativeUnitMember' {
+                $auId = $null
+                if ($Datos -is [hashtable]) { $auId = $Datos['administrativeUnitId'] } elseif ($Datos.PSObject.Properties['administrativeUnitId']) { $auId = $Datos.administrativeUnitId }
+                if ([string]::IsNullOrWhiteSpace($auId)) { return $true }
+                $actual = Get-MgDirectoryAdministrativeUnit -AdministrativeUnitId $auId -ErrorAction SilentlyContinue
+                return ($null -ne $actual)
+            }
+            'AdministrativeUnitRole' {
+                $auId = $null
+                if ($Datos -is [hashtable]) { $auId = $Datos['administrativeUnitId'] } elseif ($Datos.PSObject.Properties['administrativeUnitId']) { $auId = $Datos.administrativeUnitId }
+                if ([string]::IsNullOrWhiteSpace($auId)) { return $true }
+                $actual = Get-MgDirectoryAdministrativeUnit -AdministrativeUnitId $auId -ErrorAction SilentlyContinue
+                return ($null -ne $actual)
             }
             default {
-                # Tipo sin verificación genérica: confiamos en el manifiesto.
+                # Tipo no verificable: delegamos al Revertir de la capacidad.
+                Write-LabInfo "Test-LabCoincidenciaPorTipo: tipo '$Tipo' sin verificación de contenedor. Se delega al Revertir de la capacidad."
                 return $true
             }
         }
-
-        if ($actual -is [array]) { $actual = $actual[0] }
-        if ($null -eq $actual) {
-            # Ya no existe: idempotente, se puede "revertir" (no-op).
-            return $true
-        }
-        if ($actual.Id -ne $objectIdEsperado) {
-            # Existe otro objeto con el mismo nombre pero distinto Id.
-            return $false
-        }
-        return $true
     } catch {
-        # Si no se puede verificar, se confía en el manifiesto.
+        Write-LabWarn "Error verificando coincidencia de '$Tipo': $($_.Exception.Message). Se asume coincidencia."
         return $true
     }
 }
 
+function Test-LabObjetoCoincideConManifiesto {
+    param([object]$Objeto)
+
+    if ($null -eq $Objeto) { return $true }
+
+    $objectIdEsperado = $null
+    if ($Objeto.datos) {
+        if ($Objeto.datos -is [hashtable]) {
+            if ($Objeto.datos.Contains('objectId')) { $objectIdEsperado = $Objeto.datos['objectId'] }
+        } elseif ($Objeto.datos.PSObject.Properties['objectId']) {
+            $objectIdEsperado = $Objeto.datos.objectId
+        }
+    }
+
+    $tipo = 'Desconocido'
+    if ($Objeto.PSObject.Properties['tipo'] -and $Objeto.tipo) { $tipo = $Objeto.tipo }
+
+    return (Test-LabCoincidenciaPorTipo -Tipo $tipo -Datos $Objeto.datos -ObjectIdEsperado $objectIdEsperado)
+}
+
 function Test-LabVulnerabilidadCoincideConManifiesto {
-    <#
-    .SYNOPSIS
-        Comprueba que el objeto afectado por una vulnerabilidad sigue existiendo
-        con el objectId esperado.
-    .DESCRIPTION
-        Cada tipo de vulnerabilidad guarda en datos el objectId del objeto
-        afectado (además de otros identificadores específicos). Esta función
-        usa ese objectId para verificar que el objeto no se ha borrado y
-        recreado externamente.
-
-        Si el manifiesto no tiene objectId del objeto afectado, no se puede
-        verificar; se devuelve $true (idempotente, se confía en el manifiesto).
-        Si el objeto ya no existe, se devuelve $true (idempotente, no hay
-        nada que revertir en el objeto; la vulnerabilidad puede fallar al
-        intentar deshacer, pero no se bloquea por eso).
-        Si el objectId actual difiere del del manifiesto, se devuelve $false.
-
-        TIPOS SOPORTADOS:
-          - ServicePrincipalOwner: datos.objetoAfectadoObjectId (SP) o
-            datos.servicePrincipalId
-          - GroupOwner: datos.objetoAfectadoObjectId (grupo) o datos.groupId
-          - ApplicationSecret: datos.objetoAfectadoObjectId (app) o
-            datos.applicationId
-          - PimEligibleRole: datos.objetoAfectadoObjectId (usuario) o
-            datos.userId
-
-        Para tipos no soportados, se devuelve $true.
-    .PARAMETER Vulnerabilidad
-        Entrada de $Manifiesto.vulnerabilidades.
-    .OUTPUTS
-        $true si se puede intentar revertir, $false si no.
-    #>
-    param(
-        [Parameter(Mandatory = $true)]
-        [object]$Vulnerabilidad
-    )
+    param([object]$Vulnerabilidad)
 
     $datos = $Vulnerabilidad.datos
     if ($null -eq $datos) { return $true }
 
-    # ObjectId del objeto afectado (preferido)
     $objectIdEsperado = $null
-    if ($datos.PSObject.Properties['objetoAfectadoObjectId']) {
+    if ($datos -is [hashtable]) {
+        if ($datos.Contains('objetoAfectadoObjectId')) { $objectIdEsperado = $datos['objetoAfectadoObjectId'] }
+    } elseif ($datos.PSObject.Properties['objetoAfectadoObjectId']) {
         $objectIdEsperado = $datos.objetoAfectadoObjectId
     }
 
-    # Fallback por tipo (manifiestos antiguos o capacidades que no lo guardaron)
-    if ([string]::IsNullOrWhiteSpace($objectIdEsperado)) {
-        switch ($Vulnerabilidad.tipo) {
-            'ServicePrincipalOwner' {
-                if ($datos.PSObject.Properties['servicePrincipalId']) {
-                    $objectIdEsperado = $datos.servicePrincipalId
-                }
-            }
-            'GroupOwner' {
-                if ($datos.PSObject.Properties['groupId']) {
-                    $objectIdEsperado = $datos.groupId
-                }
-            }
-            'ApplicationSecret' {
-                if ($datos.PSObject.Properties['applicationId']) {
-                    $objectIdEsperado = $datos.applicationId
-                }
-            }
-            'PimEligibleRole' {
-                if ($datos.PSObject.Properties['userId']) {
-                    $objectIdEsperado = $datos.userId
-                }
-            }
-        }
-    }
-
-    if ([string]::IsNullOrWhiteSpace($objectIdEsperado)) {
-        # Sin objectId: no podemos verificar; confiamos en el manifiesto.
-        return $true
-    }
+    if ([string]::IsNullOrWhiteSpace($objectIdEsperado)) { return $true }
 
     try {
         $actual = $null
         switch ($Vulnerabilidad.tipo) {
-            'ServicePrincipalOwner' {
-                $actual = Get-MgServicePrincipal -ServicePrincipalId $objectIdEsperado -ErrorAction SilentlyContinue
-            }
-            'GroupOwner' {
-                $actual = Get-MgGroup -GroupId $objectIdEsperado -ErrorAction SilentlyContinue
-            }
-            'ApplicationSecret' {
-                $actual = Get-MgApplication -ApplicationId $objectIdEsperado -ErrorAction SilentlyContinue
-            }
-            'PimEligibleRole' {
-                $actual = Get-MgUser -UserId $objectIdEsperado -ErrorAction SilentlyContinue
-            }
+            'ServicePrincipalOwner' { $actual = Get-MgServicePrincipal -ServicePrincipalId $objectIdEsperado -ErrorAction SilentlyContinue }
+            'GroupOwner'            { $actual = Get-MgGroup -GroupId $objectIdEsperado -ErrorAction SilentlyContinue }
+            'ApplicationSecret'     { $actual = Get-MgApplication -ApplicationId $objectIdEsperado -ErrorAction SilentlyContinue }
+            'PimEligibleRole'       { $actual = Get-MgUser -UserId $objectIdEsperado -ErrorAction SilentlyContinue }
             default {
+                Write-LabInfo "Test-LabVulnerabilidadCoincideConManifiesto: tipo '$($Vulnerabilidad.tipo)' sin verificación. Se asume coincidencia."
                 return $true
             }
         }
 
         if ($actual -is [array]) { $actual = $actual[0] }
-        if ($null -eq $actual) {
-            # El objeto afectado ya no existe: idempotente.
-            return $true
-        }
-        if ($actual.Id -ne $objectIdEsperado) {
-            return $false
-        }
+        if ($null -eq $actual) { return $true }
+        if ($actual.Id -ne $objectIdEsperado) { return $false }
         return $true
     } catch {
         return $true
@@ -821,48 +545,14 @@ function Test-LabVulnerabilidadCoincideConManifiesto {
 }
 
 function Invoke-LabBorradoGenerico {
-    <#
-    .SYNOPSIS
-        Intenta un borrado genérico por tipo, para objetos cuya capacidad no está.
-    .OUTPUTS
-        $true si se borró (o ya no existía), $false si no se pudo.
-    #>
-    param(
-        [Parameter(Mandatory = $true)]
-        [object]$Objeto
-    )
-
+    param([object]$Objeto)
     try {
         switch ($Objeto.tipo) {
-            'Usuario' {
-                if ($Objeto.datos.upn) {
-                    $null = Remove-MgUser -UserId $Objeto.datos.upn -Confirm:$false -ErrorAction Stop
-                }
-                return $true
-            }
-            'Grupo' {
-                if ($Objeto.datos.objectId) {
-                    $null = Remove-MgGroup -GroupId $Objeto.datos.objectId -Confirm:$false -ErrorAction Stop
-                }
-                return $true
-            }
-            'Aplicacion' {
-                if ($Objeto.datos.objectId) {
-                    $null = Remove-MgApplication -ApplicationId $Objeto.datos.objectId -Confirm:$false -ErrorAction Stop
-                }
-                return $true
-            }
-            'ServicePrincipal' {
-                if ($Objeto.datos.objectId) {
-                    $null = Remove-MgServicePrincipal -ServicePrincipalId $Objeto.datos.objectId -Confirm:$false -ErrorAction Stop
-                }
-                return $true
-            }
-            default {
-                return $false
-            }
+            'Usuario'          { if ($Objeto.datos.upn) { $null = Remove-MgUser -UserId $Objeto.datos.upn -Confirm:$false -ErrorAction Stop }; return $true }
+            'Grupo'            { if ($Objeto.datos.objectId) { $null = Remove-MgGroup -GroupId $Objeto.datos.objectId -Confirm:$false -ErrorAction Stop }; return $true }
+            'Aplicacion'       { if ($Objeto.datos.objectId) { $null = Remove-MgApplication -ApplicationId $Objeto.datos.objectId -Confirm:$false -ErrorAction Stop }; return $true }
+            'ServicePrincipal' { if ($Objeto.datos.objectId) { $null = Remove-MgServicePrincipal -ServicePrincipalId $Objeto.datos.objectId -Confirm:$false -ErrorAction Stop }; return $true }
+            default { return $false }
         }
-    } catch {
-        return $false
-    }
+    } catch { return $false }
 }

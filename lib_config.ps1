@@ -1,32 +1,31 @@
 <#
 .SYNOPSIS
-    Librería de configuración persistente del menú.
+    Librería de configuración persistente del menú (PowerShell 7).
 .DESCRIPTION
     Proporciona:
-      - Ruta canónica de menu_config.json
-      - Valores por defecto (Verbose, NivelLicencia, App-Only)
-      - Carga con validación de tipos
-      - Guardado
-      - Reseteo
-      - Actualización parcial de claves
+      - Ruta canónica de menu_config.json.
+      - Valores por defecto.
+      - Carga, guardado, reseteo y actualización parcial.
+      - Normalización centralizada PSCustomObject -> Hashtable.
 
     Claves gestionadas:
-      Verbose               (bool)   - más detalle en la salida
-      NivelLicencia         (string) - Free | P1 | P2
-      ClientId              (string) - Application (client) ID de la App
-      TenantId              (string) - Directory (tenant) ID
-      CertificateThumbprint (string) - Thumbprint del certificado en Cert:\CurrentUser\My
+      Verbose               (bool)   - más detalle en la salida.
+      NivelLicencia         (string) - Free | P1 | P2.
+      ClientId              (string) - Application (client) ID de la App.
+      TenantId              (string) - Directory (tenant) ID.
+      CertificateThumbprint (string) - Thumbprint del certificado.
 
-    SEGURIDAD:
-    menu_config.json contiene ClientId, TenantId y CertificateThumbprint.
-    NO contiene la clave privada del certificado (esa vive en
-    Cert:\CurrentUser\My). El Thumbprint identifica el certificado y debe
-    tratarse como dato sensible. El fichero está en .gitignore y no debe
-    subirse a Git.
+    CONTRATO:
+      - Get-LabConfig SIEMPRE devuelve un [hashtable] con las 5 claves.
+      - Save-LabConfig acepta [hashtable] o [PSCustomObject].
+      - Update-LabConfig solo modifica claves existentes.
 .NOTES
-    Depende de lib_ui.ps1 (Write-Lab*).
-    Se carga por dot-sourcing desde menu.ps1.
+    Depende de lib_ui.ps1.
+    Requiere PowerShell 7.
 #>
+#Requires -Version 7.0
+
+# Set-StrictMode -Version Latest
 
 # ============================================================
 # RUTA CANÓNICA
@@ -38,14 +37,6 @@ $script:LabConfigPath     = Join-Path $PSScriptRoot $script:LabConfigFileName
 # VALORES POR DEFECTO
 # ============================================================
 function Get-LabConfigDefaults {
-    <#
-    .SYNOPSIS
-        Devuelve una copia nueva de los valores por defecto.
-    .DESCRIPTION
-        Incluye las claves de UI (Verbose), el nivel de licencia y los
-        datos App-Only. Las claves App-Only se rellenan desde menu.ps1
-        ([C] Gestionar sesión de Graph).
-    #>
     return @{
         Verbose               = $false
         NivelLicencia         = 'Free'
@@ -56,112 +47,126 @@ function Get-LabConfigDefaults {
 }
 
 # ============================================================
+# NORMALIZACIÓN
+# ============================================================
+function ConvertTo-LabConfigHash {
+    <#
+    .SYNOPSIS
+        Normaliza un objeto (hashtable o PSCustomObject) a [hashtable]
+        con las claves y tipos esperados.
+    .DESCRIPTION
+        Devuelve SIEMPRE un [hashtable] con las 5 claves exactas. Los
+        valores inválidos se sustituyen por el default y se avisa con
+        Write-LabWarn.
+    #>
+    param(
+        [Parameter(Mandatory = $true)]
+        $Origen
+    )
+
+    $config = Get-LabConfigDefaults
+
+    if ($null -eq $Origen) { return $config }
+
+    # Convertir a hashtable sin importar el tipo de origen
+    $origenHash = @{}
+    if ($Origen -is [hashtable]) {
+        foreach ($k in $Origen.Keys) { $origenHash["$k".ToLowerInvariant()] = $Origen[$k] }
+    } elseif ($Origen -is [pscustomobject]) {
+        foreach ($p in $Origen.PSObject.Properties) { $origenHash[$p.Name.ToLowerInvariant()] = $p.Value }
+    } else {
+        Write-LabWarn "ConvertTo-LabConfigHash: tipo no soportado ($($Origen.GetType().FullName)). Usando defaults."
+        return $config
+    }
+
+    # --- Verbose ---
+    if ($origenHash.ContainsKey('verbose')) {
+        $raw = $origenHash['verbose']
+        if ($raw -is [bool]) {
+            $config.Verbose = $raw
+        } elseif ($null -ne $raw) {
+            $config.Verbose = ([string]$raw -match '^(?i:true|1|yes|si)$')
+        }
+    }
+
+    # --- NivelLicencia ---
+    if ($origenHash.ContainsKey('nivellicencia')) {
+        $valor = "$($origenHash['nivellicencia'])".Trim()
+        if ($valor -in @('Free','P1','P2')) {
+            $config.NivelLicencia = $valor
+        } elseif (-not [string]::IsNullOrWhiteSpace($valor)) {
+            Write-LabWarn "NivelLicencia inválido en configuración: '$valor'. Usando '$($config.NivelLicencia)'."
+        }
+    }
+
+    # --- ClientId ---
+    if ($origenHash.ContainsKey('clientid') -and $null -ne $origenHash['clientid']) {
+        $config.ClientId = "$($origenHash['clientid'])".Trim()
+    }
+
+    # --- TenantId ---
+    if ($origenHash.ContainsKey('tenantid') -and $null -ne $origenHash['tenantid']) {
+        $config.TenantId = "$($origenHash['tenantid'])".Trim()
+    }
+
+    # --- CertificateThumbprint ---
+    if ($origenHash.ContainsKey('certificatethumbprint') -and $null -ne $origenHash['certificatethumbprint']) {
+        $config.CertificateThumbprint = "$($origenHash['certificatethumbprint'])".Trim()
+    }
+
+    return $config
+}
+
+# ============================================================
 # FUNCIONES PÚBLICAS
 # ============================================================
 
 function Get-LabConfigPath {
-    <#
-    .SYNOPSIS
-        Devuelve la ruta absoluta de menu_config.json.
-    #>
     return $script:LabConfigPath
 }
 
 function Test-LabConfigExists {
-    <#
-    .SYNOPSIS
-        Devuelve $true si existe el fichero de configuración.
-    #>
     return (Test-Path -Path $script:LabConfigPath)
 }
 
 function Get-LabConfig {
     <#
     .SYNOPSIS
-        Carga la configuración desde disco. Si no existe o es inválida,
-        devuelve los valores por defecto.
+        Devuelve la configuración actual como [hashtable].
     .DESCRIPTION
-        Valida tipos para evitar que un JSON editado a mano con strings
-        ("true"/"false") rompa la lógica booleana del menú. Las claves
-        App-Only se normalizan a string (vacío si no están).
-    .OUTPUTS
-        Hashtable con las claves de configuración.
+        Siempre devuelve un [hashtable] con las 5 claves esperadas,
+        con defaults aplicados si el archivo no existe o es ilegible.
     #>
-    $defaults = Get-LabConfigDefaults
-
     if (-not (Test-Path -Path $script:LabConfigPath)) {
-        return $defaults
+        return (Get-LabConfigDefaults)
     }
 
     try {
         $loaded = Get-Content -Path $script:LabConfigPath -Raw -Encoding UTF8 | ConvertFrom-Json
     } catch {
         Write-LabWarn 'No se pudo leer menu_config.json. Usando valores por defecto.'
-        return $defaults
+        return (Get-LabConfigDefaults)
     }
 
-    $config = Get-LabConfigDefaults
-
-    # --- Verbose ---
-    if ($null -ne $loaded.PSObject.Properties['Verbose']) {
-        $raw = $loaded.Verbose
-        if ($raw -is [bool]) {
-            $config.Verbose = $raw
-        } elseif ($raw -is [string]) {
-            $config.Verbose = ($raw -match '^(?i:true|1|yes|si)$')
-        } elseif ($raw -is [int]) {
-            $config.Verbose = ($raw -ne 0)
-        }
-    }
-
-    # --- NivelLicencia ---
-    if ($null -ne $loaded.PSObject.Properties['NivelLicencia']) {
-        $raw = $loaded.NivelLicencia
-        if ($null -ne $raw) {
-            $valor = ([string]$raw).Trim()
-            if ($valor -in @('Free','P1','P2')) {
-                $config.NivelLicencia = $valor
-            }
-        }
-    }
-
-    # --- ClientId ---
-    if ($null -ne $loaded.PSObject.Properties['ClientId']) {
-        $raw = $loaded.ClientId
-        if ($null -ne $raw) { $config.ClientId = ([string]$raw).Trim() }
-    }
-
-    # --- TenantId ---
-    if ($null -ne $loaded.PSObject.Properties['TenantId']) {
-        $raw = $loaded.TenantId
-        if ($null -ne $raw) { $config.TenantId = ([string]$raw).Trim() }
-    }
-
-    # --- CertificateThumbprint ---
-    if ($null -ne $loaded.PSObject.Properties['CertificateThumbprint']) {
-        $raw = $loaded.CertificateThumbprint
-        if ($null -ne $raw) { $config.CertificateThumbprint = ([string]$raw).Trim() }
-    }
-
-    return $config
+    return (ConvertTo-LabConfigHash -Origen $loaded)
 }
 
 function Save-LabConfig {
     <#
     .SYNOPSIS
         Guarda la configuración en disco.
-    .PARAMETER Config
-        Hashtable con las claves de configuración.
-    .OUTPUTS
-        $true si se guardó correctamente, $false si falló.
+    .DESCRIPTION
+        Acepta [hashtable] o [PSCustomObject]. Normaliza a [hashtable]
+        antes de escribir para que el JSON siempre tenga el mismo formato.
     #>
     param(
         [Parameter(Mandatory = $true)]
-        [hashtable]$Config
+        $Config
     )
 
     try {
-        $Config | ConvertTo-Json -Depth 3 | Set-Content -Path $script:LabConfigPath -Encoding UTF8 -Force
+        $normalizada = ConvertTo-LabConfigHash -Origen $Config
+        $normalizada | ConvertTo-Json -Depth 3 | Set-Content -Path $script:LabConfigPath -Encoding UTF8 -Force
         return $true
     } catch {
         Write-LabWarn "No se pudo guardar la configuración: $($_.Exception.Message)"
@@ -172,9 +177,7 @@ function Save-LabConfig {
 function Reset-LabConfig {
     <#
     .SYNOPSIS
-        Resetea la configuración a los valores por defecto y la guarda.
-    .OUTPUTS
-        Hashtable con los valores por defecto restaurados.
+        Restaura la configuración a los valores por defecto.
     #>
     $defaults = Get-LabConfigDefaults
     $null = Save-LabConfig -Config $defaults
@@ -184,11 +187,11 @@ function Reset-LabConfig {
 function Update-LabConfig {
     <#
     .SYNOPSIS
-        Aplica cambios parciales a la configuración y la guarda.
-    .PARAMETER Cambios
-        Hashtable con las claves a modificar.
-    .OUTPUTS
-        Hashtable con la configuración resultante.
+        Actualiza parcialmente la configuración.
+    .DESCRIPTION
+        Solo se aceptan claves que existan en Get-LabConfigDefaults. Las
+        claves desconocidas se rechazan con Write-LabWarn y NO se añaden
+        al JSON (evita claves huérfanas).
     #>
     param(
         [Parameter(Mandatory = $true)]
@@ -196,31 +199,50 @@ function Update-LabConfig {
     )
 
     $config = Get-LabConfig
+
+    $clavesValidas = @((Get-LabConfigDefaults).Keys)
     foreach ($key in $Cambios.Keys) {
+        if ($clavesValidas -notcontains $key) {
+            Write-LabWarn "Update-LabConfig: clave desconocida '$key' rechazada."
+            continue
+        }
         $config[$key] = $Cambios[$key]
     }
-    $null = Save-LabConfig -Config $config
-    return $config
+
+    $normalizada = ConvertTo-LabConfigHash -Origen $config
+    $null = Save-LabConfig -Config $normalizada
+    return $normalizada
 }
 
 # ============================================================
 # HELPERS APP-ONLY
 # ============================================================
-
 function Test-LabAppOnlyConfigComplete {
     <#
     .SYNOPSIS
-        Devuelve $true si la configuración App-Only tiene los tres datos.
-    .PARAMETER Config
-        Hashtable de configuración.
+        Devuelve $true si ClientId, TenantId y Thumbprint están completos.
+    .DESCRIPTION
+        Espera un [hashtable] (el contrato de Get-LabConfig). Si recibe
+        otra cosa, avisa y devuelve $false en lugar de intentar
+        normalizar en cada llamada.
     #>
     param(
         [Parameter(Mandatory = $true)]
-        [hashtable]$Config
+        $Config
     )
-    return (
-        -not [string]::IsNullOrWhiteSpace($Config.ClientId) -and
-        -not [string]::IsNullOrWhiteSpace($Config.TenantId) -and
-        -not [string]::IsNullOrWhiteSpace($Config.CertificateThumbprint)
-    )
+
+    if ($Config -isnot [hashtable]) {
+        Write-LabWarn "Test-LabAppOnlyConfigComplete: se esperaba [hashtable] pero llegó $($Config.GetType().FullName)."
+        return $false
+    }
+
+    $clientId   = if ($Config.ContainsKey('ClientId'))              { $Config['ClientId'] }              else { $null }
+    $tenantId   = if ($Config.ContainsKey('TenantId'))              { $Config['TenantId'] }              else { $null }
+    $thumbprint = if ($Config.ContainsKey('CertificateThumbprint')) { $Config['CertificateThumbprint'] } else { $null }
+
+    if ([string]::IsNullOrWhiteSpace($clientId))   { return $false }
+    if ([string]::IsNullOrWhiteSpace($tenantId))   { return $false }
+    if ([string]::IsNullOrWhiteSpace($thumbprint)) { return $false }
+
+    return $true
 }

@@ -7,9 +7,7 @@
 
     TIPOS DE PERMISO:
       - 'application': se concede con New-MgServicePrincipalAppRoleAssignment.
-        El permiso se busca en AppRoles del SP del recurso (Microsoft Graph).
       - 'delegated': se concede con New-MgOauth2PermissionGrant.
-        El permiso se busca en Oauth2PermissionScopes del SP del recurso.
 
     SEGURIDAD DE PREEXISTENTES:
     - Si la aplicación es preexistente (snapshot pre-lab), no se conceden
@@ -18,15 +16,19 @@
     - Si no, se concede y se marca 'creado'.
 
     DEPENDENCIAS: Aplicaciones (necesita el objectId de la app y su SP).
-
-    NIVEL: Free (conceder permisos a Microsoft Graph no requiere P1/P2;
-    el consentimiento de administrador es lo que se necesita).
+    NIVEL: Free.
+.NOTES
+    Requiere PowerShell 7.
 #>
+#Requires -Version 7.0
+
+# Set-StrictMode -Version Latest
 
 $Capacidad = @{
     Nombre      = 'PermisosApi'
+    Descripcion = 'Permisos de API de aplicaciones'
     SeccionJson = 'permisosApi'
-    Alias       = @('permisosApi','permisos_api','apiPermissions')
+    Alias       = @('permisos_api', 'apiPermissions')
     Nivel       = 'Free'
     DependeDe   = @('Aplicaciones')
     PermisosApp = @('Application.ReadWrite.All','AppRoleAssignment.ReadWrite.All','DelegatedPermissionGrant.ReadWrite.All')
@@ -101,8 +103,9 @@ $Capacidad = @{
                 continue
             }
 
-            # --- 2. Buscar la app y su SP ---
-            $app = Get-MgApplication -Filter "displayName eq '$appNombre'" -ErrorAction SilentlyContinue
+            # --- 2. Buscar la app y su SP (N14: escapado OData) ---
+            $appEscapada = $appNombre -replace "'","''"
+            $app = Get-MgApplication -Filter "displayName eq '$appEscapada'" -ErrorAction SilentlyContinue
             if (-not $app) {
                 Write-LabWarn "Aplicación '$appNombre' no encontrada; se omite permiso."
                 continue
@@ -121,7 +124,9 @@ $Capacidad = @{
             if ($recursoNombre -eq 'Microsoft Graph') {
                 $resourceSp = $graphSp
             } else {
-                $resourceSp = Get-MgServicePrincipal -Filter "displayName eq '$recursoNombre'" -ErrorAction SilentlyContinue
+                # N14: escapado OData
+                $recursoEscapado = $recursoNombre -replace "'","''"
+                $resourceSp = Get-MgServicePrincipal -Filter "displayName eq '$recursoEscapado'" -ErrorAction SilentlyContinue
                 if ($resourceSp -is [array]) { $resourceSp = $resourceSp[0] }
             }
             if (-not $resourceSp) {
@@ -131,22 +136,23 @@ $Capacidad = @{
 
             # --- 4. Buscar el permiso en el recurso ---
             if ($tipo -eq 'application') {
-                # Application permission: buscar en AppRoles
                 $appRole = $null
-                foreach ($ar in @($resourceSp.AppRoles)) {
-                    if ($ar.Value -eq $permisoValor -and $ar.AllowedMemberTypes -contains 'Application') {
-                        $appRole = $ar; break
+                if ($resourceSp.PSObject.Properties['AppRoles'] -and $null -ne $resourceSp.AppRoles) {
+                    foreach ($ar in @($resourceSp.AppRoles)) {
+                        if ($ar.Value -eq $permisoValor -and $ar.AllowedMemberTypes -contains 'Application') {
+                            $appRole = $ar; break
+                        }
                     }
                 }
+                
                 if (-not $appRole) {
                     Write-LabWarn "Permiso de aplicación '$permisoValor' no encontrado en '$recursoNombre'."
                     continue
                 }
 
-                # Comprobar si ya está concedido
                 $asignaciones = Get-MgServicePrincipalAppRoleAssignedTo -ServicePrincipalId $clientSp.Id -All -ErrorAction SilentlyContinue
                 $yaConcedido = $false
-                foreach ($a in $asignaciones) {
+                foreach ($a in @($asignaciones)) {
                     if ($a.AppRoleId -eq $appRole.Id -and $a.ResourceId -eq $resourceSp.Id) {
                         $yaConcedido = $true; break
                     }
@@ -167,7 +173,6 @@ $Capacidad = @{
                     continue
                 }
 
-                # Conceder
                 $body = @{
                     PrincipalId = $clientSp.Id
                     ResourceId  = $resourceSp.Id
@@ -191,19 +196,20 @@ $Capacidad = @{
                 }
 
             } else {
-                # Delegated permission: buscar en Oauth2PermissionScopes
                 $scope = $null
-                foreach ($s in @($resourceSp.Oauth2PermissionScopes)) {
-                    if ($s.Value -eq $permisoValor) {
-                        $scope = $s; break
+                if ($resourceSp.PSObject.Properties['Oauth2PermissionScopes'] -and $null -ne $resourceSp.Oauth2PermissionScopes) {
+                    foreach ($s in @($resourceSp.Oauth2PermissionScopes)) {
+                        if ($s.Value -eq $permisoValor) {
+                            $scope = $s; break
+                        }
                     }
                 }
+                
                 if (-not $scope) {
                     Write-LabWarn "Permiso delegado '$permisoValor' no encontrado en '$recursoNombre'."
                     continue
                 }
 
-                # Comprobar si ya está concedido
                 $grants = Get-MgOauth2PermissionGrant -Filter "clientId eq '$($clientSp.Id)' and resourceId eq '$($resourceSp.Id)'" -ErrorAction SilentlyContinue
                 $yaConcedido = $false
                 $grantExistente = $null
@@ -231,7 +237,6 @@ $Capacidad = @{
                     continue
                 }
 
-                # Conceder (AllPrincipals)
                 try {
                     $grant = New-MgOauth2PermissionGrant -ClientId $clientSp.Id -ConsentType 'AllPrincipals' -ResourceId $resourceSp.Id -Scope $permisoValor -ErrorAction Stop
                     Write-Verbose "   -> Permiso delegado '$permisoValor' concedido a '$appNombre'"
@@ -264,7 +269,6 @@ $Capacidad = @{
         $clientSpId = if ($Objeto.datos) { $Objeto.datos.clientSpId } else { $null }
 
         if ([string]::IsNullOrWhiteSpace($clientSpId)) {
-            # Preexistente o sin datos: no hay nada que revertir
             return $true
         }
 
@@ -275,12 +279,12 @@ $Capacidad = @{
 
                 $asignaciones = Get-MgServicePrincipalAppRoleAssignedTo -ServicePrincipalId $clientSpId -All -ErrorAction SilentlyContinue
                 $encontrada = $null
-                foreach ($a in $asignaciones) {
+                foreach ($a in @($asignaciones)) {
                     if ($a.AppRoleId -eq $appRoleId) {
                         $encontrada = $a; break
                     }
                 }
-                if (-not $encontrada) { return $true }  # idempotente
+                if (-not $encontrada) { return $true }
 
                 $null = Remove-MgServicePrincipalAppRoleAssignedTo -ServicePrincipalId $clientSpId -AppRoleAssignmentId $encontrada.Id -Confirm:$false -ErrorAction Stop
                 return $true
@@ -290,7 +294,7 @@ $Capacidad = @{
                 if (-not $grantId) { return $true }
 
                 $grant = Get-MgOauth2PermissionGrant -OAuth2PermissionGrantId $grantId -ErrorAction SilentlyContinue
-                if (-not $grant) { return $true }  # idempotente
+                if (-not $grant) { return $true }
 
                 $null = Remove-MgOauth2PermissionGrant -OAuth2PermissionGrantId $grantId -Confirm:$false -ErrorAction Stop
                 return $true
@@ -314,7 +318,6 @@ $Capacidad = @{
             return $null
         }
 
-        # Snapshot pre-lab
         if ($Contexto.SnapshotPreLab -and
             $Contexto.SnapshotPreLab.ContainsKey('aplicaciones') -and
             $Contexto.SnapshotPreLab.aplicaciones.ContainsKey($appNombre)) {
@@ -347,4 +350,4 @@ $Capacidad = @{
     }
 }
 
-Register-LabCapacidad -Capacidad $Capacidad
+$null = Register-LabCapacidad -Capacidad $Capacidad

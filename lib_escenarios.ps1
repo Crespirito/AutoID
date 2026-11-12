@@ -1,161 +1,80 @@
-<#
-.SYNOPSIS
-    Librería de normalización y validación de escenarios.
-.DESCRIPTION
-    Proporciona:
-      - ConvertTo-LabEscenarioNormalizado: convierte un JSON (o un objeto
-        ya deserializado) en un objeto con todas las secciones posibles,
-        agrupadas por Nombre de capacidad.
-      - ConvertFrom-LabEscenarioNormalizado: hace el camino inverso,
-        generando un objeto serializable a JSON.
-      - Listado y carga de escenarios, vulnerabilidades y plantillas.
-
-    Estructura del objeto normalizado:
-      [pscustomobject]@{
-        Nombre          = 'escenarioej1'
-        Descripcion     = '...'
-        Version         = '1.0'
-        SourcePath      = 'C:\...\escenarioej1.json'   # $null si vino de memoria
-        Secciones       = @{ 'Usuarios' = @(...); 'Grupos' = @(...); ... }
-        Desconocidas    = @('pim', 'otraSeccion')       # nombres de secciones sin capacidad
-        RawDesconocidas = @{ 'pim' = @(...) }           # valores originales de esas secciones
-        Errores         = @()                           # errores de normalización
-      }
-
-    Cada sección es siempre un array (nunca $null, nunca objeto suelto).
-    Las secciones desconocidas se preservan en RawDesconocidas para que
-    ConvertFrom-LabEscenarioNormalizado pueda reconstruirlas sin pérdida.
-
-    CAPACIDADES SIN SECCIONJSON:
-    Algunas capacidades (por ejemplo, Vulnerabilidades) tienen
-    SeccionJson = $null porque no consumen una sección del escenario:
-    se aplican sobre objetos existentes desde un flujo dedicado. Esas
-    capacidades NO crean entrada en Secciones. Si un escenario antiguo
-    tuviera una sección con su Alias, caería en Desconocidas y se
-    preservaría en RawDesconocidas.
-
-    CATÁLOGO DE VULNERABILIDADES:
-    Get-LabVulnerabilidad y Get-LabVulnerabilidadesDisponibles leen el
-    catálogo de escenarios/vulnerab/*.json. Se usan desde
-    cap_vulnerabilidades.ps1 [C] para cargar una vulnerabilidad por
-    nombre y, opcionalmente, sobrescribir sus parámetros.
-.NOTES
-    Depende de lib_ui.ps1 y lib_caps.ps1.
-    Se carga por dot-sourcing desde menu.ps1.
-#>
-
 # ============================================================
-# RUTAS CANÓNICAS
-# ============================================================
-$script:LabEscenariosRoot       = Join-Path $PSScriptRoot 'escenarios'
-$script:LabEscenariosPath       = Join-Path $script:LabEscenariosRoot 'escenario'
-$script:LabVulnerabilidadesPath = Join-Path $script:LabEscenariosRoot 'vulnerab'
-$script:LabPlantillasPath       = Join-Path $script:LabEscenariosRoot 'plantillas'
-$script:LabSecretsPath          = Join-Path $script:LabEscenariosRoot '.secrets'
-
-# ============================================================
-# RUTAS
+# HELPERS INTERNOS (robustos frente a hashtable / pscustomobject)
 # ============================================================
 
-function Get-LabEscenariosPath {
-    <#
-    .SYNOPSIS
-        Devuelve la ruta absoluta de la carpeta de escenarios.
-    #>
-    return $script:LabEscenariosPath
+function script:Test-EsDiccionario {
+    param([object]$Obj)
+    return ($Obj -is [System.Collections.IDictionary])
 }
 
-function Get-LabVulnerabilidadesPath {
-    <#
-    .SYNOPSIS
-        Devuelve la ruta absoluta de la carpeta de vulnerabilidades.
-    #>
-    return $script:LabVulnerabilidadesPath
+function script:Get-DicValor {
+    param(
+        [object]$Obj,
+        [string]$Clave,
+        [object]$PorDefecto = $null
+    )
+    if ($null -eq $Obj) { return $PorDefecto }
+    if (Test-EsDiccionario $Obj) {
+        if ($Obj.Contains($Clave)) { return $Obj[$Clave] }
+        return $PorDefecto
+    }
+    $prop = $Obj.PSObject.Properties[$Clave]
+    if ($prop) { return $prop.Value }
+    return $PorDefecto
 }
 
-function Get-LabPlantillasPath {
-    <#
-    .SYNOPSIS
-        Devuelve la ruta absoluta de la carpeta de plantillas.
-    #>
-    return $script:LabPlantillasPath
+function script:Get-DicTiene {
+    param([object]$Obj, [string]$Clave)
+    if ($null -eq $Obj) { return $false }
+    if (Test-EsDiccionario $Obj) { return $Obj.Contains($Clave) }
+    return ($null -ne $Obj.PSObject.Properties[$Clave])
 }
 
-function Get-LabSecretsPath {
-    <#
-    .SYNOPSIS
-        Devuelve la ruta absoluta de la carpeta de semillas locales.
-    #>
-    return $script:LabSecretsPath
+function script:Resolve-Placeholders {
+    param(
+        [object]$Valor,
+        [hashtable]$Variables
+    )
+    if ($null -eq $Valor) { return $null }
+    if ($Valor -is [string]) {
+        $resultado = $Valor
+        foreach ($k in $Variables.Keys) {
+            $resultado = $resultado -replace [regex]::Escape("{$k}"), [string]$Variables[$k]
+        }
+        return $resultado
+    }
+    if ($Valor -is [System.Collections.IDictionary]) {
+        $nuevo = @{}
+        foreach ($k in $Valor.Keys) {
+            $nuevo[$k] = Resolve-Placeholders -Valor $Valor[$k] -Variables $Variables
+        }
+        return $nuevo
+    }
+    if ($Valor -is [System.Management.Automation.PSCustomObject]) {
+        $nuevo = [ordered]@{}
+        foreach ($p in $Valor.PSObject.Properties) {
+            $nuevo[$p.Name] = Resolve-Placeholders -Valor $p.Value -Variables $Variables
+        }
+        return [pscustomobject]$nuevo
+    }
+    if ($Valor -is [System.Collections.IEnumerable]) {
+        return @($Valor | ForEach-Object { Resolve-Placeholders -Valor $_ -Variables $Variables })
+    }
+    return $Valor
 }
 
 # ============================================================
-# LISTADO
-# ============================================================
-
-function Get-LabEscenariosDisponibles {
-    <#
-    .SYNOPSIS
-        Devuelve los nombres (sin extensión) de los escenarios disponibles.
-    #>
-    if (-not (Test-Path -Path $script:LabEscenariosPath)) { return @() }
-    $files = Get-ChildItem -Path $script:LabEscenariosPath -Filter '*.json' -File -ErrorAction SilentlyContinue
-    return @($files | ForEach-Object { $_.BaseName } | Sort-Object)
-}
-
-function Get-LabVulnerabilidadesDisponibles {
-    <#
-    .SYNOPSIS
-        Devuelve los nombres (sin extensión) de las vulnerabilidades disponibles
-        en el catálogo (escenarios/vulnerab/*.json).
-    .DESCRIPTION
-        Se usa desde cap_vulnerabilidades.ps1 [C] para listar las
-        vulnerabilidades que el operador puede cargar por nombre.
-    #>
-    if (-not (Test-Path -Path $script:LabVulnerabilidadesPath)) { return @() }
-    $files = Get-ChildItem -Path $script:LabVulnerabilidadesPath -Filter '*.json' -File -ErrorAction SilentlyContinue
-    return @($files | ForEach-Object { $_.BaseName } | Sort-Object)
-}
-
-function Get-LabPlantillasDisponibles {
-    <#
-    .SYNOPSIS
-        Devuelve los nombres (sin extensión) de las plantillas disponibles.
-    #>
-    if (-not (Test-Path -Path $script:LabPlantillasPath)) { return @() }
-    $files = Get-ChildItem -Path $script:LabPlantillasPath -Filter '*.json' -File -ErrorAction SilentlyContinue
-    return @($files | ForEach-Object { $_.BaseName } | Sort-Object)
-}
-
-# ============================================================
-# NORMALIZACIÓN
+# NORMALIZACIÓN ROBUSTA
 # ============================================================
 
 function ConvertTo-LabEscenarioNormalizado {
-    <#
-    .SYNOPSIS
-        Convierte un JSON de escenario en un objeto normalizado por capacidad.
-    .DESCRIPTION
-        Acepta o bien la ruta de un .json, o bien un objeto ya deserializado.
-        Descubre las secciones a partir de las capacidades registradas.
-        Las secciones no reclamadas por ninguna capacidad van a 'Desconocidas'
-        (solo nombres) y sus valores originales a 'RawDesconocidas'.
-
-        Capacidades con SeccionJson = $null (por ejemplo, Vulnerabilidades)
-        no crean entrada en Secciones: se aplican desde un flujo dedicado,
-        no forman parte del escenario. Si un escenario antiguo tuviera una
-        sección con su Alias, caería en Desconocidas y se preservaría en
-        RawDesconocidas.
-    .PARAMETER Path
-        Ruta de un fichero .json.
-    .PARAMETER Raw
-        Objeto ya deserializado. Si se especifica, se ignora Path.
-    .OUTPUTS
-        PSCustomObject con la estructura normalizada.
-    #>
     param(
         [string]$Path = $null,
-        [object]$Raw = $null
+        [object]$Raw = $null,
+
+        # Variables para resolver placeholders tipo {tenant} antes de validar.
+        # Si no se pasan, se intentan derivar de tenantDomain.
+        [hashtable]$Variables = $null
     )
 
     $sourcePath = $null
@@ -179,92 +98,307 @@ function ConvertTo-LabEscenarioNormalizado {
         throw 'ConvertTo-LabEscenarioNormalizado: el objeto crudo es $null.'
     }
 
-    $errores = @()
+    $errores = [System.Collections.Generic.List[string]]::new()
 
+    # ----- metadatos -----
     $nombre = $null
-    if ($Raw.PSObject.Properties['nombre'])      { $nombre = [string]$Raw.nombre }
-    elseif ($Raw.PSObject.Properties['Nombre'])  { $nombre = [string]$Raw.Nombre }
-    elseif ($sourcePath)                          { $nombre = [System.IO.Path]::GetFileNameWithoutExtension($sourcePath) }
+    foreach ($k in @('nombre','Nombre')) {
+        if ((Get-DicTiene $Raw $k) -and -not [string]::IsNullOrWhiteSpace([string](Get-DicValor $Raw $k))) {
+            $nombre = [string](Get-DicValor $Raw $k); break
+        }
+    }
+    if ([string]::IsNullOrWhiteSpace($nombre) -and $sourcePath) {
+        $nombre = [System.IO.Path]::GetFileNameWithoutExtension($sourcePath)
+    }
 
     $descripcion = $null
-    if ($Raw.PSObject.Properties['descripcion'])     { $descripcion = [string]$Raw.descripcion }
-    elseif ($Raw.PSObject.Properties['Descripcion']) { $descripcion = [string]$Raw.Descripcion }
+    foreach ($k in @('descripcion','Descripcion')) {
+        if (Get-DicTiene $Raw $k) { $descripcion = [string](Get-DicValor $Raw $k); break }
+    }
 
     $version = '1.0'
-    if ($Raw.PSObject.Properties['version']) { $version = [string]$Raw.version }
+    foreach ($k in @('version','Version')) {
+        if (Get-DicTiene $Raw $k) { $version = [string](Get-DicValor $Raw $k); break }
+    }
 
-    $clavesJson = @($Raw.PSObject.Properties.Name)
+    $tenantDomain = $null
+    foreach ($k in @('tenantDomain','TenantDomain')) {
+        $v = Get-DicValor $Raw $k
+        if (-not [string]::IsNullOrWhiteSpace([string]$v)) { $tenantDomain = [string]$v; break }
+    }
 
-    $secciones = @{}
-    $capacidades = Get-LabCapacidades
+    # Variables de resolución: lo pasado > derivado de tenantDomain
+    $vars = @{}
+    if ($Variables) { foreach ($k in $Variables.Keys) { $vars[$k] = $Variables[$k] } }
+    if ($tenantDomain -and -not $vars.ContainsKey('tenant')) {
+        $vars['tenant'] = $tenantDomain
+    }
+    if ($tenantDomain -and -not $vars.ContainsKey('tenantDomain')) {
+        $vars['tenantDomain'] = $tenantDomain
+    }
 
-    foreach ($cap in $capacidades) {
-        $nombreCap = $cap.Nombre
+    # ----- secciones -----
+    $secciones = [ordered]@{}
+    $seccionesOriginales = @{}        # nombreInterno -> @{ NombreJson = ...; Alias = ... }
+    $desconocidas = [System.Collections.Generic.List[string]]::new()
+    $rawDesconocidas = [ordered]@{}
 
-        if ([string]::IsNullOrWhiteSpace($cap.SeccionJson)) {
+    $metadatos = @(
+        'nombre','Nombre','descripcion','Descripcion',
+        'version','Version','tenantDomain','TenantDomain'
+    )
+
+    # Acepta PSCustomObject (ConvertFrom-Json), Hashtable y diccionarios.
+    $props = @()
+    if ($Raw -is [System.Collections.IDictionary]) {
+        $props = @($Raw.Keys | ForEach-Object { [pscustomobject]@{ Name = [string]$_; Value = $Raw[$_] } })
+    } else {
+        $props = @($Raw.PSObject.Properties)
+    }
+
+    foreach ($prop in $props) {
+        if ($prop.Name -in $metadatos) { continue }
+
+        $claveOriginal = $prop.Name
+        $capacidad = Get-LabCapacidadPorSeccion -NombreSeccion $claveOriginal
+
+        if (-not $capacidad) {
+            $desconocidas.Add($claveOriginal)
+            $rawDesconocidas[$claveOriginal] = $prop.Value
             continue
         }
 
-        $candidatos = @($cap.SeccionJson)
-        if ($cap.ContainsKey('Alias') -and $cap.Alias) {
-            $candidatos += @($cap.Alias)
+        $nombreInterno = [string](Get-DicValor $capacidad 'Nombre')
+        if ([string]::IsNullOrWhiteSpace($nombreInterno)) {
+            $nombreInterno = $claveOriginal
         }
 
-        $encontrada = $null
-        foreach ($c in $candidatos) {
-            if ($clavesJson -contains $c) { $encontrada = $c; break }
+        # Resolver placeholders en los items
+        $itemsResueltos = @()
+        if ($null -ne $prop.Value) {
+            $itemsResueltos = @(
+                Resolve-Placeholders -Valor $prop.Value -Variables $vars
+            )
         }
 
-        if ($encontrada) {
-            $valor = $Raw.$encontrada
-            if ($null -eq $valor -or [string]::IsNullOrWhiteSpace([string]$valor)) {
-                $secciones[$nombreCap] = @()
-            } else {
-                # IMPORTANTE: Forzamos a array incluso si solo hay un elemento o es una propiedad Count
-                $secciones[$nombreCap] = @($valor)
-            }
-            $clavesJson = @($clavesJson | Where-Object { $_ -ne $encontrada })
+        # Acumular si la misma capacidad aparece con varias claves
+        if ($secciones.Contains($nombreInterno)) {
+            $acumulado = @($secciones[$nombreInterno]) + $itemsResueltos
+            $secciones[$nombreInterno] = @($acumulado)
+            $seccionesOriginales[$nombreInterno].Alias += $claveOriginal
         } else {
-            $secciones[$nombreCap] = @()
+            $secciones[$nombreInterno] = @($itemsResueltos)
+            $seccionesOriginales[$nombreInterno] = @{
+                NombreJson = $claveOriginal
+                Alias      = @($claveOriginal)
+            }
         }
-    }
-
-    # Secciones desconocidas: guardar nombre Y valor original
-    $desconocidas = @($clavesJson | Where-Object { $_ -notin @('nombre','Nombre','descripcion','Descripcion','version') })
-    $rawDesconocidas = @{}
-    foreach ($d in $desconocidas) {
-        $rawDesconocidas[$d] = $Raw.$d
     }
 
     if ($desconocidas.Count -gt 0) {
-        $errores += "Secciones sin capacidad registrada: $($desconocidas -join ', '). ¿Carpeta desactivada?"
+        $errores.Add("Secciones sin capacidad registrada: $($desconocidas -join ', ').")
     }
 
-    return [pscustomobject]@{
-        Nombre          = $nombre
-        Descripcion     = $descripcion
-        Version         = $version
-        SourcePath      = $sourcePath
-        Secciones       = $secciones
-        Desconocidas    = $desconocidas
-        RawDesconocidas = $rawDesconocidas
-        Errores         = $errores
+    return @{
+        Nombre              = $nombre
+        Descripcion         = $descripcion
+        Version             = $version
+        SourcePath          = $sourcePath
+        TenantDomain        = $tenantDomain
+        Variables           = $vars
+        Secciones           = $secciones
+        SeccionesOriginales = $seccionesOriginales
+        Desconocidas        = @($desconocidas)
+        RawDesconocidas     = $rawDesconocidas
+        Errores             = @($errores)
     }
 }
+
+# ============================================================
+# VALIDACIÓN ROBUSTA
+# ============================================================
+
+function Invoke-LabValidacionEscenario {
+    param(
+        [Parameter(Mandatory = $true)]
+        [object]$EscenarioNormalizado,
+
+        [hashtable]$Contexto = @{}
+    )
+
+    $errores = [System.Collections.Generic.List[string]]::new()
+
+    # 1) Errores arrastrados de la normalización
+    if ($EscenarioNormalizado.ContainsKey('Errores')) {
+        foreach ($e in @($EscenarioNormalizado['Errores'])) {
+            if (-not [string]::IsNullOrWhiteSpace($e)) { $errores.Add($e) }
+        }
+    }
+
+    if (-not $EscenarioNormalizado.ContainsKey('Secciones')) {
+        $errores.Add('El escenario no tiene la clave Secciones.')
+        return @($errores)
+    }
+
+    # 2) Contexto enriquecido (por si el ValidarDef lo necesita)
+    $ctx = @{}
+    foreach ($k in $Contexto.Keys) { $ctx[$k] = $Contexto[$k] }
+    if (-not $ctx.ContainsKey('Escenario')) { $ctx['Escenario'] = $EscenarioNormalizado }
+    if ($EscenarioNormalizado.ContainsKey('Nombre') -and -not $ctx.ContainsKey('Nombre')) {
+        $ctx['Nombre'] = $EscenarioNormalizado['Nombre']
+    }
+    if ($EscenarioNormalizado.ContainsKey('TenantDomain') -and -not $ctx.ContainsKey('TenantDomain')) {
+        $ctx['TenantDomain'] = $EscenarioNormalizado['TenantDomain']
+    }
+    if ($EscenarioNormalizado.ContainsKey('Variables')) {
+        foreach ($k in $EscenarioNormalizado['Variables'].Keys) {
+            if (-not $ctx.ContainsKey($k)) { $ctx[$k] = $EscenarioNormalizado['Variables'][$k] }
+        }
+    }
+
+    $originales = if ($EscenarioNormalizado.ContainsKey('SeccionesOriginales')) {
+        $EscenarioNormalizado['SeccionesOriginales']
+    } else { @{} }
+
+    # 3) Validar sección por sección
+    foreach ($nombreInterno in @($EscenarioNormalizado['Secciones'].Keys)) {
+        $def = @($EscenarioNormalizado['Secciones'][$nombreInterno])
+        if ($def.Count -eq 0) { continue }
+
+        $etiqueta = $nombreInterno
+        if ($originales.ContainsKey($nombreInterno)) {
+            $etiqueta = $originales[$nombreInterno].NombreJson
+        }
+
+        # 3a) Lookup de capacidad tolerante
+        $cap = $null
+        try { $cap = Get-LabCapacidad -Nombre $nombreInterno } catch { $cap = $null }
+        if (-not $cap) {
+            try { $cap = Get-LabCapacidadPorSeccion -NombreSeccion $etiqueta } catch { $cap = $null }
+        }
+        if (-not $cap) {
+            $errores.Add("[$etiqueta] No hay capacidad registrada para la sección '$etiqueta' (interno: '$nombreInterno').")
+            continue
+        }
+
+        # 3b) ValidarDef (compatible con hashtable y pscustomobject)
+        $validarDef = Get-DicValor $cap 'ValidarDef'
+        if ($validarDef -is [scriptblock]) {
+            try {
+                # Se pasan dos argumentos posicionales + contexto nombrado, para
+                # que el scriptblock pueda elegir la firma que prefiera:
+                #   param($def)
+                #   param($def, $contexto)
+                $errsCap = & $validarDef $def $ctx
+            } catch {
+                $errores.Add("[$etiqueta] Error ejecutando ValidarDef: $($_.Exception.Message)")
+                continue
+            }
+
+            if ($null -ne $errsCap) {
+                foreach ($e in @($errsCap)) {
+                    if ([string]::IsNullOrWhiteSpace([string]$e)) { continue }
+                    $errores.Add("[$etiqueta] $e")
+                }
+            }
+        }
+    }
+
+    return @($errores)
+}
+
+# ============================================================
+# RUTAS Y LISTADO DE ESCENARIOS
+# ============================================================
+
+function Get-LabEscenariosPath {
+    <#
+    .SYNOPSIS
+        Devuelve la carpeta donde viven los escenarios JSON (escenarios/escenario).
+    .DESCRIPTION
+        La crea si no existe para que cualquier guardado posterior funcione.
+    #>
+    $ruta = Join-Path $PSScriptRoot 'escenarios/escenario'
+    if (-not (Test-Path -LiteralPath $ruta -PathType Container)) {
+        try { $null = New-Item -Path $ruta -ItemType Directory -Force } catch { }
+    }
+    return $ruta
+}
+
+function Get-LabPlantillasPath {
+    <#
+    .SYNOPSIS
+        Devuelve la carpeta de plantillas de escenarios (escenarios/plantillas).
+    #>
+    $ruta = Join-Path $PSScriptRoot 'escenarios/plantillas'
+    if (-not (Test-Path -LiteralPath $ruta -PathType Container)) {
+        try { $null = New-Item -Path $ruta -ItemType Directory -Force } catch { }
+    }
+    return $ruta
+}
+
+function Get-LabEscenariosDisponibles {
+    <#
+    .SYNOPSIS
+        Lista los nombres (sin extensión) de los escenarios disponibles.
+    .DESCRIPTION
+        Devuelve el nombre sin '.json', ordenado alfabéticamente. Si hay un
+        escenario y una plantilla con el mismo nombre, se deduplica.
+    #>
+    $nombres = [System.Collections.Generic.List[string]]::new()
+
+    foreach ($dir in @((Get-LabEscenariosPath), (Get-LabPlantillasPath))) {
+        if ([string]::IsNullOrWhiteSpace($dir)) { continue }
+        if (-not (Test-Path -LiteralPath $dir -PathType Container)) { continue }
+
+        foreach ($f in @(Get-ChildItem -LiteralPath $dir -Filter '*.json' -File -ErrorAction SilentlyContinue)) {
+            $n = [System.IO.Path]::GetFileNameWithoutExtension($f.Name)
+            if ([string]::IsNullOrWhiteSpace($n)) { continue }
+            if (-not ($nombres | Where-Object { [string]::Equals($_, $n, [StringComparison]::OrdinalIgnoreCase) })) {
+                $nombres.Add($n)
+            }
+        }
+    }
+
+    return @($nombres | Sort-Object)
+}
+
+function Resolve-LabEscenarioPath {
+    <#
+    .SYNOPSIS
+        Devuelve la ruta completa de un escenario por nombre, buscando en
+        escenarios/escenario y escenarios/plantillas. $null si no existe.
+    #>
+    param(
+        [Parameter(Mandatory = $true)][string]$Nombre
+    )
+
+    if ([string]::IsNullOrWhiteSpace($Nombre)) { return $null }
+
+    $nombreLimpio = [System.IO.Path]::GetFileNameWithoutExtension($Nombre.Trim())
+
+    foreach ($dir in @((Get-LabEscenariosPath), (Get-LabPlantillasPath))) {
+        if ([string]::IsNullOrWhiteSpace($dir)) { continue }
+        $p = Join-Path $dir "$nombreLimpio.json"
+        if (Test-Path -LiteralPath $p -PathType Leaf) { return $p }
+    }
+    return $null
+}
+
+# ============================================================
+# EXPORTACIÓN (normalizado -> JSON del escenario)
+# ============================================================
 
 function ConvertFrom-LabEscenarioNormalizado {
     <#
     .SYNOPSIS
-        Convierte un escenario normalizado en un objeto serializable a JSON.
+        Convierte un escenario normalizado (en memoria) al objeto JSON
+        que se escribe en disco.
     .DESCRIPTION
-        Genera un objeto con 'nombre', 'descripcion', 'version' y una clave
-        por cada capacidad con sección no vacía, usando su SeccionJson.
-        Las secciones desconocidas se reconstruyen desde RawDesconocidas
-        para no perder datos.
-    .PARAMETER EscenarioNormalizado
-        Resultado de ConvertTo-LabEscenarioNormalizado.
-    .OUTPUTS
-        PSCustomObject listo para ConvertTo-Json.
+        Contrapartida de ConvertTo-LabEscenarioNormalizado. Usa la clave
+        JSON original (SeccionesOriginales.NombreJson) o, si no consta,
+        la SeccionJson de la capacidad. Conserva las secciones desconocidas
+        para no perder datos del usuario.
     #>
     param(
         [Parameter(Mandatory = $true)]
@@ -272,183 +406,63 @@ function ConvertFrom-LabEscenarioNormalizado {
     )
 
     $obj = [ordered]@{}
-    if ($EscenarioNormalizado.Nombre)      { $obj['nombre']      = $EscenarioNormalizado.Nombre }
-    if ($EscenarioNormalizado.Descripcion) { $obj['descripcion'] = $EscenarioNormalizado.Descripcion }
-    if ($EscenarioNormalizado.Version)     { $obj['version']     = $EscenarioNormalizado.Version }
 
-    foreach ($nombreCap in $EscenarioNormalizado.Secciones.Keys) {
-        $def = @($EscenarioNormalizado.Secciones[$nombreCap])
-        if ($def.Count -eq 0) { continue }
+    $nombre = $null
+    $descripcion = $null
+    $version = '1.0'
+    $tenantDomain = $null
 
-        $cap = Get-LabCapacidad -Nombre $nombreCap
-        if (-not $cap -or [string]::IsNullOrWhiteSpace($cap.SeccionJson)) {
-            $obj[$nombreCap] = $def
-            continue
-        }
-        $obj[$cap.SeccionJson] = $def
+    if ($EscenarioNormalizado -is [System.Collections.IDictionary]) {
+        if ($EscenarioNormalizado.Contains('Nombre')) { $nombre = $EscenarioNormalizado['Nombre'] }
+        if ($EscenarioNormalizado.Contains('Descripcion')) { $descripcion = $EscenarioNormalizado['Descripcion'] }
+        if ($EscenarioNormalizado.Contains('Version') -and $EscenarioNormalizado['Version']) { $version = $EscenarioNormalizado['Version'] }
+        if ($EscenarioNormalizado.Contains('TenantDomain')) { $tenantDomain = $EscenarioNormalizado['TenantDomain'] }
+    } else {
+        $nombre = Get-DicValor $EscenarioNormalizado 'Nombre'
+        $descripcion = Get-DicValor $EscenarioNormalizado 'Descripcion'
+        $v = Get-DicValor $EscenarioNormalizado 'Version'
+        if ($v) { $version = $v }
+        $tenantDomain = Get-DicValor $EscenarioNormalizado 'TenantDomain'
     }
 
-    # Reconstruir desconocidas con su valor original
-    if ($EscenarioNormalizado.PSObject.Properties['RawDesconocidas'] -and
-        $null -ne $EscenarioNormalizado.RawDesconocidas) {
-        foreach ($d in $EscenarioNormalizado.Desconocidas) {
-            if ([string]::IsNullOrWhiteSpace($d)) { continue }
-            if ($EscenarioNormalizado.RawDesconocidas.ContainsKey($d)) {
-                $obj[$d] = $EscenarioNormalizado.RawDesconocidas[$d]
+    $obj['nombre'] = $nombre
+    $obj['descripcion'] = $descripcion
+    $obj['version'] = $version
+    if (-not [string]::IsNullOrWhiteSpace([string]$tenantDomain)) {
+        $obj['tenantDomain'] = $tenantDomain
+    }
+
+    $secciones = Get-DicValor $EscenarioNormalizado 'Secciones'
+    $originales = Get-DicValor $EscenarioNormalizado 'SeccionesOriginales'
+    $desconocidas = Get-DicValor $EscenarioNormalizado 'RawDesconocidas'
+
+    if ($secciones) {
+        foreach ($nombreInterno in @($secciones.Keys)) {
+            $items = @($secciones[$nombreInterno])
+            if ($items.Count -eq 0) { continue }
+
+            $clave = $nombreInterno
+            if ($originales -and $originales.ContainsKey($nombreInterno)) {
+                $clave = $originales[$nombreInterno].NombreJson
             } else {
-                $obj[$d] = @()
+                $cap = Get-LabCapacidadPorSeccion -NombreSeccion $nombreInterno
+                if ($cap -and $cap.ContainsKey('SeccionJson') -and -not [string]::IsNullOrWhiteSpace([string]$cap.SeccionJson)) {
+                    $clave = [string]$cap.SeccionJson
+                }
             }
+
+            $obj[$clave] = @($items)
         }
-    } else {
-        # Fallback: sin RawDesconocidas, se ponen vacías
-        foreach ($d in @($EscenarioNormalizado.Desconocidas)) {
-            if ([string]::IsNullOrWhiteSpace($d)) { continue }
-            $obj[$d] = @()
+    }
+
+    if ($desconocidas) {
+        $claves = if ($desconocidas -is [System.Collections.IDictionary]) { @($desconocidas.Keys) } else { @($desconocidas.PSObject.Properties.Name) }
+        foreach ($k in $claves) {
+            if (-not $obj.Contains($k)) {
+                $obj[$k] = Get-DicValor $desconocidas $k
+            }
         }
     }
 
     return [pscustomobject]$obj
-}
-
-function Test-LabEscenarioTieneSecciones {
-    <#
-    .SYNOPSIS
-        Devuelve $true si el escenario normalizado tiene al menos una sección con contenido.
-    .PARAMETER EscenarioNormalizado
-        Resultado de ConvertTo-LabEscenarioNormalizado.
-    .OUTPUTS
-        $true si hay contenido, $false si todas las secciones están vacías.
-    #>
-    param(
-        [Parameter(Mandatory = $true)]
-        [object]$EscenarioNormalizado
-    )
-
-    foreach ($nombreCap in $EscenarioNormalizado.Secciones.Keys) {
-        if (@($EscenarioNormalizado.Secciones[$nombreCap]).Count -gt 0) {
-            return $true
-        }
-    }
-    return $false
-}
-
-# ============================================================
-# CARGA DE VULNERABILIDADES (CATÁLOGO)
-# ============================================================
-
-function Get-LabVulnerabilidad {
-    <#
-    .SYNOPSIS
-        Carga una vulnerabilidad del catálogo por nombre.
-    .DESCRIPTION
-        Lee escenarios/vulnerab/<Nombre>.json y devuelve un objeto con
-        Nombre, Descripcion, Tipo, Parametros y RequiereLicencia.
-
-        Se usa desde cap_vulnerabilidades.ps1 [C] para cargar una
-        vulnerabilidad por nombre y, opcionalmente, sobrescribir sus
-        parámetros.
-    .PARAMETER Nombre
-        Nombre de la vulnerabilidad (sin extensión).
-    .OUTPUTS
-        PSCustomObject con Nombre, Descripcion, Tipo, Parametros, RequiereLicencia.
-    #>
-    param(
-        [Parameter(Mandatory = $true)]
-        [string]$Nombre
-    )
-
-    $path = Join-Path $script:LabVulnerabilidadesPath "$Nombre.json"
-    if (-not (Test-Path -Path $path)) {
-        throw "No existe la vulnerabilidad '$Nombre' en $($script:LabVulnerabilidadesPath)."
-    }
-
-    try {
-        $raw = Get-Content -Path $path -Raw -Encoding UTF8 | ConvertFrom-Json
-    } catch {
-        throw "La vulnerabilidad '$Nombre' no es un JSON válido: $($_.Exception.Message)"
-    }
-
-    if (-not $raw.PSObject.Properties['tipo']) {
-        throw "La vulnerabilidad '$Nombre' no declara 'tipo'."
-    }
-
-    # Normalizar parametros: acepta objeto o hashtable
-    $parametros = @{}
-    if ($raw.PSObject.Properties['parametros'] -and $null -ne $raw.parametros) {
-        if ($raw.parametros -is [hashtable]) {
-            foreach ($k in $raw.parametros.Keys) {
-                $parametros[$k] = $raw.parametros[$k]
-            }
-        } else {
-            foreach ($p in $raw.parametros.PSObject.Properties) {
-                $parametros[$p.Name] = $p.Value
-            }
-        }
-    }
-
-    return [pscustomobject]@{
-        Nombre           = $Nombre
-        Descripcion      = if ($raw.PSObject.Properties['descripcion']) { $raw.descripcion } else { $null }
-        Tipo             = $raw.tipo
-        Parametros       = $parametros
-        RequiereLicencia = if ($raw.PSObject.Properties['requiereLicencia']) { $raw.requiereLicencia } else { $null }
-    }
-}
-
-# ============================================================
-# PLANTILLAS
-# ============================================================
-
-function Get-LabPlantilla {
-    <#
-    .SYNOPSIS
-        Carga una plantilla por nombre y la normaliza.
-    .PARAMETER Nombre
-        Nombre de la plantilla (sin extensión).
-    .OUTPUTS
-        PSCustomObject normalizado.
-    #>
-    param(
-        [Parameter(Mandatory = $true)]
-        [string]$Nombre
-    )
-
-    $path = Join-Path $script:LabPlantillasPath "$Nombre.json"
-    if (-not (Test-Path -Path $path)) {
-        throw "No existe la plantilla '$Nombre' en $($script:LabPlantillasPath)."
-    }
-    return ConvertTo-LabEscenarioNormalizado -Path $path
-}
-
-function Save-LabPlantilla {
-    <#
-    .SYNOPSIS
-        Guarda un escenario normalizado como plantilla.
-    .PARAMETER EscenarioNormalizado
-        Escenario normalizado.
-    .PARAMETER Nombre
-        Nombre de la plantilla (sin extensión).
-    .OUTPUTS
-        $true si se guardó, $false si falló.
-    #>
-    param(
-        [Parameter(Mandatory = $true)]
-        [object]$EscenarioNormalizado,
-
-        [Parameter(Mandatory = $true)]
-        [string]$Nombre
-    )
-
-    try {
-        if (-not (Test-Path -Path $script:LabPlantillasPath)) {
-            $null = New-Item -ItemType Directory -Path $script:LabPlantillasPath -Force
-        }
-        $obj = ConvertFrom-LabEscenarioNormalizado -EscenarioNormalizado $EscenarioNormalizado
-        $path = Join-Path $script:LabPlantillasPath "$Nombre.json"
-        $obj | ConvertTo-Json -Depth 15 | Set-Content -Path $path -Encoding UTF8 -Force
-        return $true
-    } catch {
-        Write-LabWarn "No se pudo guardar la plantilla '$Nombre': $($_.Exception.Message)"
-        return $false
-    }
 }

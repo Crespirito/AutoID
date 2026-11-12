@@ -20,14 +20,19 @@
       y no se crea otra.
 
     DEPENDENCIAS: Aplicaciones (necesita el objectId de la app).
-
     NIVEL: Free.
+.NOTES
+    Requiere PowerShell 7.
 #>
+#Requires -Version 7.0
+
+# Set-StrictMode -Version Latest
 
 $Capacidad = @{
     Nombre      = 'CredencialesApp'
+    Descripcion = 'Client secrets de aplicaciones'
     SeccionJson = 'credencialesApp'
-    Alias       = @('credencialesApp','credenciales_app','secrets')
+    Alias       = @('credenciales_app', 'secrets')
     Nivel       = 'Free'
     DependeDe   = @('Aplicaciones')
     PermisosApp = @('Application.ReadWrite.All')
@@ -56,10 +61,12 @@ $Capacidad = @{
                 try {
                     $fecha = [datetime]$c.endDateTime
                     if ($fecha -lt (Get-Date)) {
-                        $errores += "Credencial #`${i}: 'endDateTime' ya ha pasado ($fecha)."
+                        # CORREGIDO: sintaxis de variables
+                        $errores += "Credencial #${i}: 'endDateTime' ya ha pasado ($fecha)."
                     }
                 } catch {
-                    $errores += "Credencial #`${i}: 'endDateTime' inválido ('$($c.endDateTime)')."
+                    # CORREGIDO: sintaxis de variables
+                    $errores += "Credencial #${i}: 'endDateTime' inválido ('$($c.endDateTime)')."
                 }
             }
         }
@@ -97,7 +104,9 @@ $Capacidad = @{
             }
 
             # --- 2. Buscar la app ---
-            $app = Get-MgApplication -Filter "displayName eq '$appNombre'" -ErrorAction SilentlyContinue
+            # N14: escapado OData
+            $appEscapada = $appNombre -replace "'","''"
+            $app = Get-MgApplication -Filter "displayName eq '$appEscapada'" -ErrorAction SilentlyContinue
             if (-not $app) {
                 Write-LabWarn "Aplicación '$appNombre' no encontrada para credencial; se omite."
                 continue
@@ -106,7 +115,9 @@ $Capacidad = @{
 
             # --- 3. Comprobar si la credencial ya existe ---
             $credencialesExistentes = @()
-            if ($app.PasswordCredentials) { $credencialesExistentes = @($app.PasswordCredentials) }
+            if ($app.PSObject.Properties['PasswordCredentials'] -and $null -ne $app.PasswordCredentials) { 
+                $credencialesExistentes = @($app.PasswordCredentials) 
+            }
 
             $yaExiste = $false
             foreach ($pc in $credencialesExistentes) {
@@ -144,7 +155,6 @@ $Capacidad = @{
                 continue
             }
 
-            # El secreto solo se devuelve aquí. No se guarda en el manifiesto.
             $secreto = $resultado.SecretText
             $keyId = $resultado.KeyId
 
@@ -202,29 +212,30 @@ $Capacidad = @{
         $appId = if ($Objeto.datos) { $Objeto.datos.appId } else { $null }
         $keyId = if ($Objeto.datos) { $Objeto.datos.keyId } else { $null }
 
-        # Si no hay keyId (preexistente o reutilizado), no hay nada que revertir
         if ([string]::IsNullOrWhiteSpace($keyId)) {
             return $true
         }
 
-        # Buscar la app por appId
         try {
             $app = $null
             if ($appId) {
-                $app = Get-MgApplication -Filter "appId eq '$appId'" -ErrorAction SilentlyContinue
+                $appIdEscapado = $appId -replace "'","''"
+                $app = Get-MgApplication -Filter "appId eq '$appIdEscapado'" -ErrorAction SilentlyContinue
             }
-            if (-not $app) { return $true }  # idempotente
+            if (-not $app) { return $true }
             if ($app -is [array]) { $app = $app[0] }
 
             # Comprobar que la credencial existe
             $credenciales = @()
-            if ($app.PasswordCredentials) { $credenciales = @($app.PasswordCredentials) }
+            if ($app.PSObject.Properties['PasswordCredentials'] -and $null -ne $app.PasswordCredentials) { 
+                $credenciales = @($app.PasswordCredentials) 
+            }
 
             $existe = $false
             foreach ($pc in $credenciales) {
                 if ($pc.KeyId -eq $keyId) { $existe = $true; break }
             }
-            if (-not $existe) { return $true }  # idempotente
+            if (-not $existe) { return $true }
 
             $null = Remove-MgApplicationPassword -ApplicationId $app.Id -KeyId $keyId -Confirm:$false -ErrorAction Stop
             return $true
@@ -245,7 +256,6 @@ $Capacidad = @{
             return $null
         }
 
-        # Snapshot pre-lab
         if ($Contexto.SnapshotPreLab -and
             $Contexto.SnapshotPreLab.ContainsKey('aplicaciones') -and
             $Contexto.SnapshotPreLab.aplicaciones.ContainsKey($appNombre)) {
@@ -272,4 +282,4 @@ $Capacidad = @{
     }
 }
 
-Register-LabCapacidad -Capacidad $Capacidad
+$null = Register-LabCapacidad -Capacidad $Capacidad

@@ -2,47 +2,20 @@
 .SYNOPSIS
     Creación automática de entorno de laboratorio en Entra ID.
 .DESCRIPTION
-    Flujo de creación automática de ESCENARIOS (no de vulnerabilidades):
-      1. Elegir nivel de licencia (Free / P1 / P2).
-      2. Elegir tipo de escenario (plantilla) o escenario concreto.
-      3. Revisar resumen generado por las capacidades.
-      4. Crear, con opción de parar y guardar plantilla en cualquier momento.
-
-    Las VULNERABILIDADES no se aplican desde aquí: son una entidad
-    separada que se aplica sobre objetos existentes. Se crean desde
-    menu.ps1 [5] Crear vulnerabilidad.
-
-    Las contraseñas de los usuarios se derivan de la semilla local del
-    escenario (escenarios/.secrets/<escenario>.seed) y se muestran UNA
-    SOLA VEZ al final.
-
-    El snapshot pre-lab lo construye Invoke-LabCreacion automáticamente.
-    Las capacidades lo consultan para no adoptar objetos preexistentes.
-
-    La sesión de Graph la gestiona menu.ps1. Este script NO conecta ni
-    desconecta; solo verifica que hay sesión activa y falla con código 1
-    si no la hay (salvo en -DryRun).
-.PARAMETER Escenario
-    Nombre del escenario a crear (sin extensión). Si se omite, se muestra
-    un menú de selección.
-.PARAMETER Plantilla
-    Nombre de la plantilla a usar como tipo de escenario. Si se omite,
-    se muestra un menú de plantillas.
-.PARAMETER ExcluirVulnerabilidad
-    Nombres de vulnerabilidades a excluir. En el flujo actual de
-    creauto.ps1 no hay vulnerabilidades que aplicar (no son parte del
-    escenario), así que este parámetro es un no-op documentado. Se pasa
-    al contexto para que, si en el futuro se añade un flujo combinado
-    escenario + vulnerabilidades, ya esté cableado.
-.PARAMETER DryRun
-    Si se especifica, no crea nada. Solo muestra el resumen y sale.
-    No requiere sesión de Graph ni semilla.
+    Lee un archivo JSON de escenario y lo despliega en Entra ID.
+    Flujo:
+      1. Mostrar escenarios disponibles y seleccionar uno (con números).
+      2. Confirmar acción con la letra G o salir con X.
+      3. Generar contraseñas a partir de la semilla.
+      4. Desplegar usando Invoke-LabCreacion.
+      5. Guardar manifiesto y mostrar credenciales.
 .NOTES
     Depende de lib_ui.ps1, lib_graph.ps1, lib_config.ps1,
     lib_manifiesto.ps1, lib_escenarios.ps1, lib_niveles.ps1,
     lib_caps.ps1, lib_creadores.ps1.
+    Requiere PowerShell 7.
 #>
-#Requires -Version 5.1
+#Requires -Version 7.0
 
 [CmdletBinding()]
 param(
@@ -50,16 +23,10 @@ param(
     [string]$Escenario = $null,
 
     [Parameter(Mandatory = $false)]
-    [string]$Plantilla = $null,
-
-    [Parameter(Mandatory = $false)]
-    [string[]]$ExcluirVulnerabilidad = @(),
-
-    [Parameter(Mandatory = $false)]
     [switch]$DryRun
 )
 
-Set-StrictMode -Version Latest
+# Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
 # ============================================================
@@ -73,6 +40,68 @@ $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'lib_niveles.ps1')
 . (Join-Path $PSScriptRoot 'lib_caps.ps1')
 . (Join-Path $PSScriptRoot 'lib_creadores.ps1')
+. (Join-Path $PSScriptRoot 'lib_helpers.ps1')
+
+# ============================================================
+# HELPERS DE ACCESO SEGURO A PROPIEDADES
+# ============================================================
+
+function Get-LabPropSegura {
+    <#
+    .SYNOPSIS
+        Devuelve el valor de una propiedad de un objeto, o $null si no existe.
+    .DESCRIPTION
+        Evita errores de StrictMode cuando se accede a propiedades que
+        pueden no existir. Acepta objetos PSCustomObject y Hashtable.
+    #>
+    param(
+        [Parameter(Mandatory = $true)] $Objeto,
+        [Parameter(Mandatory = $true)] [string]$Nombre,
+        $PorDefecto = $null
+    )
+
+    if ($null -eq $Objeto) { return $PorDefecto }
+
+    if ($Objeto -is [hashtable]) {
+        if ($Objeto.ContainsKey($Nombre)) {
+            $v = $Objeto[$Nombre]
+            if ($null -ne $v) { return $v }
+            return $PorDefecto
+        }
+        return $PorDefecto
+    }
+
+    if ($Objeto.PSObject.Properties[$Nombre]) {
+        $v = $Objeto.$Nombre
+        if ($null -ne $v) { return $v }
+        return $PorDefecto
+    }
+
+    return $PorDefecto
+}
+
+function Get-LabTenantDomainSafe {
+    <#
+    .SYNOPSIS
+        Devuelve el dominio verificado del tenant con fallback a TenantId.
+    #>
+    $dominio = $null
+    try {
+        $dominio = Get-LabTenantDomain
+    } catch {
+        $dominio = $null
+    }
+    if (-not [string]::IsNullOrWhiteSpace($dominio)) {
+        return $dominio
+    }
+    try {
+        $ctx = Get-MgContext
+        if ($ctx -and -not [string]::IsNullOrWhiteSpace($ctx.TenantId)) {
+            return $ctx.TenantId
+        }
+    } catch { }
+    return $null
+}
 
 # ============================================================
 # VERIFICACIÓN DE SESIÓN
@@ -90,262 +119,176 @@ if (-not $DryRun) {
 # ESTADO Y CONFIGURACIÓN
 # ============================================================
 $config = Get-LabConfig
-$null = Initialize-LabCapacidades -Root (Join-Path $PSScriptRoot 'lib_caps')
-
-# ============================================================
-# FUNCIONES AUXILIARES: SEMILLA Y CONTRASEÑAS
-# ============================================================
-
-function Get-LabSecretsDir {
-    <#
-    .SYNOPSIS
-        Devuelve la ruta de la carpeta de secretos locales.
-    #>
-    return (Join-Path $PSScriptRoot 'escenarios/.secrets')
+$totalCaps = Initialize-LabCapacidades -Root (Join-Path $PSScriptRoot 'lib_caps')
+if ($totalCaps -eq 0) {
+    Write-LabError 'No se han cargado capacidades. Revisa la carpeta lib_caps.'
+    exit 1
 }
 
-function Get-LabSeed {
-    <#
-    .SYNOPSIS
-        Obtiene o genera la semilla de un escenario.
-    .OUTPUTS
-        Byte[] con la semilla.
-    #>
-    param(
-        [Parameter(Mandatory = $true)]
-        [string]$NombreEscenario
-    )
-
-    $seedPath = Join-Path (Get-LabSecretsDir) "$NombreEscenario.seed"
-    $seedDir = Split-Path -Path $seedPath -Parent
-
-    if (-not (Test-Path -Path $seedDir)) {
-        $null = New-Item -ItemType Directory -Path $seedDir -Force
-    }
-
-    if (Test-Path -Path $seedPath) {
-        $b64 = (Get-Content -Path $seedPath -Raw -Encoding UTF8).Trim()
-        return [Convert]::FromBase64String($b64)
-    }
-
-    $bytes = New-Object byte[] 32
-    $rng = [System.Security.Cryptography.RandomNumberGenerator]::Create()
-    try { $rng.GetBytes($bytes) } finally { $rng.Dispose() }
-
-    $b64 = [Convert]::ToBase64String($bytes)
-    Set-Content -Path $seedPath -Value $b64 -Encoding UTF8 -Force
-
-    try {
-        if ($IsWindows -or $PSVersionTable.PSEdition -eq 'Desktop') {
-            $acl = Get-Acl -Path $seedPath
-            $acl.SetAccessRuleProtection($true, $false)
-            $rule = New-Object System.Security.AccessControl.FileSystemAccessRule(
-                [System.Security.Principal.WindowsIdentity]::GetCurrent().Name,
-                'FullControl',
-                'Allow'
-            )
-            $acl.SetAccessRule($rule)
-            Set-Acl -Path $seedPath -AclObject $acl
-        }
-    } catch {
-        Write-LabWarn "No se pudieron restringir los permisos de $seedPath : $($_.Exception.Message)"
-    }
-
-    Write-LabInfo "Semilla generada para '$NombreEscenario' en $seedPath"
-    return $bytes
-}
-
-function New-LabPasswordFromSeed {
-    <#
-    .SYNOPSIS
-        Deriva una contraseña determinista a partir de la semilla y el UPN.
-    #>
-    param(
-        [Parameter(Mandatory = $true)] [byte[]]$Semilla,
-        [Parameter(Mandatory = $true)] [string]$Upn
-    )
-
-    $hmac = New-Object System.Security.Cryptography.HMACSHA256
-    try {
-        $hmac.Key = $Semilla
-        $hash = $hmac.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($Upn.ToLowerInvariant()))
-    } finally {
-        $hmac.Dispose()
-    }
-
-    $b64 = [Convert]::ToBase64String($hash)
-    $core = ($b64 -replace '[^A-Za-z0-9]', '').Substring(0, 16)
-    return "$core!Aa1"
-}
-
-# ============================================================
-# SELECCIÓN DE NIVEL Y TIPO
-# ============================================================
-
-function Select-LabNivel {
-    <#
-    .SYNOPSIS
-        Pide al operador que elija el nivel de licencia.
-    .OUTPUTS
-        String con el nivel elegido, o $null si se cancela.
-    #>
-    $niveles = Get-LabNivelesDisponibles
-    if ($niveles.Count -eq 0) {
-        Write-LabError 'No hay niveles disponibles (¿carpetas de capacidades vacías?).'
-        return $null
-    }
-
-    Show-LabHeader -Titulo 'SELECCION DE NIVEL DE LICENCIA'
-    for ($i = 0; $i -lt $niveles.Count; $i++) {
-        $desc = Get-LabNivelDescripcion -Nivel $niveles[$i]
-        Write-Host ('  [{0}] {1} - {2}' -f $i, $niveles[$i], $desc)
-    }
-    Write-Host ''
-
-    $sel = Read-Host 'Selecciona un nivel'
-    if (-not ($sel -match '^\d+$') -or [int]$sel -ge $niveles.Count) {
-        Write-LabError 'Selección inválida.'
-        return $null
-    }
-    return $niveles[[int]$sel]
-}
-
-function Select-LabTipoEscenario {
-    <#
-    .SYNOPSIS
-        Pide al operador que elija una plantilla o un escenario.
-    .OUTPUTS
-        PSCustomObject con Tipo ('plantilla' o 'escenario') y Nombre,
-        o $null si se cancela.
-    #>
-    $plantillas = Get-LabPlantillasDisponibles
-    $escenarios = Get-LabEscenariosDisponibles
-
-    Show-LabHeader -Titulo 'SELECCION DE TIPO DE ESCENARIO'
-
-    $opciones = @()
-    $i = 0
-    if ($plantillas.Count -gt 0) {
-        Write-Host '  Plantillas:' -ForegroundColor Cyan
-        foreach ($p in $plantillas) {
-            Write-Host ('    [{0}] {1}' -f $i, $p)
-            $opciones += [pscustomobject]@{ Tipo = 'plantilla'; Nombre = $p }
-            $i++
-        }
-        Write-Host ''
-    }
-    if ($escenarios.Count -gt 0) {
-        Write-Host '  Escenarios:' -ForegroundColor Cyan
-        foreach ($e in $escenarios) {
-            Write-Host ('    [{0}] {1}' -f $i, $e)
-            $opciones += [pscustomobject]@{ Tipo = 'escenario'; Nombre = $e }
-            $i++
-        }
-        Write-Host ''
-    }
-
-    if ($opciones.Count -eq 0) {
-        Write-LabError 'No hay plantillas ni escenarios disponibles.'
-        return $null
-    }
-
-    $sel = Read-Host 'Selecciona una opción'
-    if (-not ($sel -match '^\d+$') -or [int]$sel -ge $opciones.Count) {
-        Write-LabError 'Selección inválida.'
-        return $null
-    }
-    return $opciones[[int]$sel]
-}
 
 # ============================================================
 # FLUJO PRINCIPAL
 # ============================================================
 
-# 1. Elegir nivel
-if (-not $DryRun) {
-    $nivelElegido = Select-LabNivel
-    if (-not $nivelElegido) { exit 1 }
-} else {
-    $nivelElegido = Get-LabNivelActual -Config $config
+# 1. Si no se pasó un escenario por parámetro, mostrar menú
+if (-not $Escenario) {
+    $escenarios = @(Get-LabEscenariosDisponibles)
+
+    if ($escenarios.Count -eq 0) {
+        Write-LabError "No hay escenarios disponibles en $(Get-LabEscenariosPath)."
+        Write-LabInfo 'Usa [2] Creación manual o generar_biblioteca.ps1 para crear uno.'
+        exit 1
+    }
+
+    $seleccionado = $null
+    $salirMenu = $false
+
+    while (-not $salirMenu) {
+        Show-LabHeader -Titulo 'SELECCION DE ESCENARIO'
+
+        for ($i = 0; $i -lt $escenarios.Count; $i++) {
+            $marca = if ($seleccionado -eq $escenarios[$i]) { ' [*]' } else { '' }
+            Write-Host ('  [{0}] {1}{2}' -f ($i + 1), $escenarios[$i], $marca)
+        }
+
+        Write-Host ''
+        Write-Host '  [G] Guardar y crear en Entra ID (requiere selección)'
+        Write-Host '  [X] Salir sin hacer nada'
+        Write-Host ''
+
+        if ($seleccionado) {
+            Write-Host "  Escenario seleccionado: $seleccionado" -ForegroundColor Green
+        } else {
+            Write-Host "  Ningún escenario seleccionado." -ForegroundColor DarkGray
+        }
+        Write-Host ''
+
+        $opcion = Read-Host 'Selecciona una opción (número, G o X)'
+
+        if ([string]::IsNullOrWhiteSpace($opcion)) { continue }
+
+        $opcionUpper = $opcion.ToUpper()
+
+        if ($opcionUpper -eq 'X') {
+            Write-LabInfo 'Operación cancelada por el usuario.'
+            exit 0
+        }
+        elseif ($opcionUpper -eq 'G') {
+            if (-not $seleccionado) {
+                Write-LabWarn 'Primero debes seleccionar un escenario de la lista con un número.'
+                Start-Sleep -Seconds 2
+            } else {
+                $Escenario = $seleccionado
+                $salirMenu = $true
+            }
+        }
+        elseif ($opcion -match '^\d+$') {
+            $idx = [int]$opcion - 1
+            if ($idx -ge 0 -and $idx -lt $escenarios.Count) {
+                $seleccionado = $escenarios[$idx]
+            } else {
+                Write-LabWarn 'Número de escenario fuera de rango.'
+                Start-Sleep -Seconds 2
+            }
+        }
+        else {
+            Write-LabWarn 'Opción no válida.'
+            Start-Sleep -Seconds 2
+        }
+    }
 }
 
-# 2. Elegir plantilla o escenario
-if (-not $Escenario -and -not $Plantilla) {
-    $seleccion = Select-LabTipoEscenario
-    if (-not $seleccion) { exit 1 }
-    if ($seleccion.Tipo -eq 'plantilla') {
-        $Plantilla = $seleccion.Nombre
-    } else {
-        $Escenario = $seleccion.Nombre
-    }
-}
-
-# 3. Cargar el escenario normalizado
-if ($Plantilla) {
-    try {
-        $esc = Get-LabPlantilla -Nombre $Plantilla
-    } catch {
-        Write-LabError "No se pudo cargar la plantilla '$Plantilla': $($_.Exception.Message)"
-        exit 1
-    }
-} elseif ($Escenario) {
-    $path = Join-Path (Get-LabEscenariosPath) "$Escenario.json"
-    if (-not (Test-Path -Path $path)) {
-        Write-LabError "No existe el escenario '$Escenario' en $(Get-LabEscenariosPath)."
-        exit 1
-    }
-    try {
-        $esc = ConvertTo-LabEscenarioNormalizado -Path $path
-    } catch {
-        Write-LabError "No se pudo cargar el escenario '$Escenario': $($_.Exception.Message)"
-        exit 1
-    }
-} else {
-    Write-LabError 'Debes especificar un escenario o una plantilla.'
+# 2. Cargar el escenario normalizado
+$path = Resolve-LabEscenarioPath -Nombre $Escenario
+if (-not $path) { $path = Join-Path (Get-LabEscenariosPath) "$Escenario.json" }
+if (-not (Test-Path -Path $path)) {
+    Write-LabError "No existe el archivo del escenario: $path"
     exit 1
 }
 
-# 4. Resumen
-Show-LabHeader -Titulo ('RESUMEN DEL ESCENARIO: ' + ($esc.Nombre))
-
-if ($DryRun) {
-    Write-Host '*** MODO SIMULACION (-DryRun): NO se creara nada en Entra ID ***' -ForegroundColor Yellow
-    Write-Host ''
+try {
+    $esc = ConvertTo-LabEscenarioNormalizado -Path $path
+} catch {
+    Write-LabError "No se pudo cargar el escenario '$Escenario': $($_.Exception.Message)"
+    exit 1
 }
 
-Write-Host "Descripcion: $($esc.Descripcion)" -ForegroundColor Gray
-Write-Host "Nivel elegido: $nivelElegido" -ForegroundColor Gray
+# 3. Resumen visual y validación de vacío
+$nombreEsc = if ($null -ne $esc -and (Get-DicTiene $esc 'Nombre') -and -not [string]::IsNullOrWhiteSpace([string](Get-DicValor $esc 'Nombre'))) { [string](Get-DicValor $esc 'Nombre') } else { $Escenario }
+Show-LabHeader -Titulo ('RESUMEN DEL ESCENARIO: ' + $nombreEsc)
+
+$nivelActual = Get-LabNivelActual -Config $config
+Write-Host "Descripción: $($esc.Descripcion)" -ForegroundColor Gray
+Write-Host "Nivel actual: $nivelActual" -ForegroundColor Gray
 Write-Host ''
 
+$tieneDatos = $false
 foreach ($nombreCap in $esc.Secciones.Keys) {
     $def = @($esc.Secciones[$nombreCap])
     if ($def.Count -eq 0) { continue }
+
+    $tieneDatos = $true
     $cap = Get-LabCapacidad -Nombre $nombreCap
     if (-not $cap) {
         Write-Host "  [$nombreCap] (capacidad no registrada)" -ForegroundColor Red
         continue
     }
-    $texto = & $cap.Describir $def
-    Write-Host "  $texto" -ForegroundColor Gray
+
+    try {
+        $texto = & $cap.Describir $def
+        Write-Host "  $texto" -ForegroundColor Gray
+    } catch {
+        Write-Host "  [$nombreCap] $($def.Count) objetos (error en Describir)" -ForegroundColor Yellow
+    }
+}
+
+if (-not $tieneDatos) {
+    Write-LabWarn 'El escenario no tiene ningún objeto para crear (todas las secciones están vacías).'
+    exit 0
 }
 
 if ($esc.Desconocidas.Count -gt 0) {
     Write-Host ''
-    Write-LabWarn "Secciones sin capacidad registrada: $($esc.Desconocidas -join ', ')"
+    Write-LabWarn "Secciones desconocidas ignoradas: $($esc.Desconocidas -join ', ')"
 }
 Write-Host ''
 
-# 5. Validación
-$errores = Invoke-LabValidacionEscenario -EscenarioNormalizado $esc -Contexto @{ Nivel = $nivelElegido }
-if (@($errores).Count -gt 0) {
-    Write-LabError 'El escenario tiene errores de validación:'
-    foreach ($e in $errores) { Write-Host "  - $e" -ForegroundColor Red }
-    exit 1
+# Validar con las capacidades (FORZADO)
+$errores = @()
+foreach ($nombreSeccion in $esc.Secciones.Keys) {
+    $def = @($esc.Secciones[$nombreSeccion])
+    if ($def.Count -eq 0) { continue }
+
+    $cap = Get-LabCapacidadPorSeccion -NombreSeccion $nombreSeccion
+    if (-not $cap) {
+        $errores += "No hay capacidad para la sección '$nombreSeccion'."
+        continue
+    }
+
+    if ($cap.ContainsKey('ValidarDef') -and $cap.ValidarDef -is [scriptblock]) {
+        try {
+            $errsCap = & $cap.ValidarDef $def
+            foreach ($e in @($errsCap)) {
+                if (-not [string]::IsNullOrWhiteSpace($e)) {
+                    $errores += "[$($cap.Nombre)] $e"
+                }
+            }
+        } catch {
+            $errores += "[$($cap.Nombre)] Error ejecutando ValidarDef: $($_.Exception.Message)"
+        }
+    }
 }
 
-# 6. Confirmación (o salida en DryRun)
+if (@($errores).Count -gt 0) {
+    Write-LabError 'El escenario tiene errores de validación:'
+    foreach ($e in @($errores)) { Write-Host "  - $e" -ForegroundColor Red }
+    exit 1
+}
+# 4. Confirmación final
 if ($DryRun) {
-    Write-Host 'Simulacion completada. No se ha modificado Entra ID.' -ForegroundColor Yellow
+    Write-Host '*** MODO SIMULACION (-DryRun): NO se modificara Entra ID ***' -ForegroundColor Yellow
+    Write-Host ''
+    Write-LabOk 'Simulación completada.'
     exit 0
 }
 
@@ -356,80 +299,55 @@ if ($resp -ne 'SI') {
     exit 0
 }
 
-# 7. Derivar contraseñas
-$nombreSemilla = if ($esc.Nombre) { $esc.Nombre } else { 'manual_' + (Get-Date -Format 'yyyyMMdd_HHmmss') }
+# 5. Derivar contraseñas e inyectarlas
+$nombreEscenarioSeguro = "manual_" + (Get-Date -Format 'yyyyMMdd_HHmmss')
+if ($null -ne $esc -and (Get-DicTiene $esc 'Nombre') -and -not [string]::IsNullOrWhiteSpace([string](Get-DicValor $esc 'Nombre'))) {
+    $nombreEscenarioSeguro = [string](Get-DicValor $esc 'Nombre')
+}
+
+$nombreSemilla = $nombreEscenarioSeguro
 $semilla = Get-LabSeed -NombreEscenario $nombreSemilla
 
 $passwords = @{}
-foreach ($nombreCap in $esc.Secciones.Keys) {
-    $def = @($esc.Secciones[$nombreCap])
-    if ($def.Count -eq 0) { continue }
-    if ($nombreCap -eq 'Usuarios') {
-        foreach ($u in $def) {
-            $upn = $u.upn -replace '\{tenant\}', $esc.TenantDomain
+if ($esc.Secciones.Contains('Usuarios')) {
+    foreach ($u in @($esc.Secciones['Usuarios'])) {
+        if ($null -eq $u) { continue }
+        if ((Get-DicTiene $u 'upn') -and -not [string]::IsNullOrWhiteSpace([string](Get-DicValor $u 'upn'))) {
+            $upn = [string](Get-DicValor $u 'upn') -replace '\{tenant\}', [string](Get-DicValor $esc 'TenantDomain')
             $passwords[$upn] = New-LabPasswordFromSeed -Semilla $semilla -Upn $upn
         }
     }
 }
 
-# 8. Manifiesto
-$manifiesto = New-LabManifiestoVacio -Escenario $esc.Nombre -Nivel $nivelElegido -Semilla $nombreSemilla
-$manifiesto.TenantDomain = (Get-MgContext).TenantId
+# Copia defensiva del hashtable antes de mutarlo
+$config = $config.Clone()
+$config['Passwords'] = $passwords
 
-# 9. Crear con opción de parar
-$detenerScript = {
-    param($nombreCap, $ctx)
-    Write-Host ''
-    Write-Host "Capacidad a crear: $nombreCap" -ForegroundColor Cyan
-    $r = Read-Host '  ¿Continuar? [SI] / [P]arar y guardar plantilla / [C]ancelar'
-    if ($r -eq 'P') {
-        Write-LabWarn 'Deteniendo creación. Se guardará la plantilla de lo hecho hasta ahora.'
-        return $true
-    }
-    if ($r -eq 'C') {
-        Write-LabWarn 'Creación cancelada. No se guarda nada.'
-        return $true
-    }
-    return $false
+# 6. Manifiesto y Creación
+$manifiesto = New-LabManifiestoVacio -Escenario $nombreEscenarioSeguro -Nivel $nivelActual -Semilla $nombreSemilla
+
+# N6: TenantDomain real, con fallback a TenantId
+$tenantDomainActual = Get-LabTenantDomainSafe
+$manifiesto.TenantDomain = $tenantDomainActual
+
+Write-Host ''
+Write-LabBanner 'Iniciando despliegue en Entra ID'
+$resultado = Invoke-LabCreacion -EscenarioNormalizado $esc -Manifiesto $manifiesto -Config $config
+
+# 7. Guardar manifiesto
+$manifiestoPath = Get-LabManifiestoPath
+if (Save-LabManifiesto -Manifiesto $manifiesto -Path $manifiestoPath) {
+    Write-LabOk "Manifiesto guardado en: $manifiestoPath"
+} else {
+    Write-LabError 'No se pudo guardar el manifiesto.'
 }
 
-$resultado = Invoke-LabCreacion -EscenarioNormalizado $esc -Manifiesto $manifiesto -Config $config -Detener $detenerScript
-
-# 10. Si se detuvo, guardar plantilla
-if ($resultado.Resultado -eq 'detenido') {
-    Write-LabInfo 'Guardando plantilla del escenario parcial...'
-    $nombrePlantilla = Read-Host 'Nombre de la plantilla (Enter para cancelar)'
-    if (-not [string]::IsNullOrWhiteSpace($nombrePlantilla)) {
-        $parcial = ConvertTo-LabEscenarioNormalizado -Raw ([pscustomobject]@{})
-        $parcial.Nombre = $nombrePlantilla
-        $parcial.Descripcion = "Plantilla parcial generada el $(Get-Date -Format 'yyyy-MM-dd HH:mm')"
-        foreach ($nombreCap in $resultado.Contexto.ObjetosCreados.Keys) {
-            $objetos = @($resultado.Contexto.ObjetosCreados[$nombreCap])
-            if ($objetos.Count -eq 0) { continue }
-            $defs = @()
-            foreach ($o in $objetos) {
-                if ($o.datos -and $o.datos.PSObject.Properties['upn']) {
-                    $defs += [pscustomobject]@{ upn = $o.datos.upn; displayName = $o.datos.displayName }
-                } elseif ($o.datos -and $o.datos.PSObject.Properties['displayName']) {
-                    $defs += [pscustomobject]@{ displayName = $o.datos.displayName }
-                }
-            }
-            if ($defs.Count -gt 0) {
-                $parcial.Secciones[$nombreCap] = $defs
-            }
-        }
-        if (Save-LabPlantilla -EscenarioNormalizado $parcial -Nombre $nombrePlantilla) {
-            Write-LabOk "Plantilla guardada: $nombrePlantilla"
-        }
-    }
-}
-
-# 11. Mostrar contraseñas derivadas (una sola vez)
+# 8. Mostrar credenciales finales
 if ($passwords.Count -gt 0) {
     Write-Host ''
     Write-Host '=== CONTRASEÑAS DERIVADAS (MOSTRAR UNA SOLA VEZ) ===' -ForegroundColor Yellow
     Write-Host 'Anota estas credenciales. No se guardan en el manifiesto ni en el JSON.' -ForegroundColor Yellow
-    Write-Host 'Para reproducirlas, conserva la semilla local del escenario.' -ForegroundColor Yellow
+    Write-Host "Semilla: $nombreSemilla" -ForegroundColor Yellow
     Write-Host ''
     foreach ($upn in $passwords.Keys) {
         Write-Host ("  {0} / {1}" -f $upn, $passwords[$upn]) -ForegroundColor Gray
@@ -437,22 +355,5 @@ if ($passwords.Count -gt 0) {
     Write-Host ''
 }
 
-# 12. Guardar manifiesto y log
-$manifiestoPath = Get-LabManifiestoPath
-if (Save-LabManifiesto -Manifiesto $manifiesto -Path $manifiestoPath) {
-    Write-LabOk "Manifiesto guardado: $manifiestoPath"
-} else {
-    Write-LabError 'No se pudo guardar el manifiesto.'
-}
-
-$logPath = Join-Path $PSScriptRoot "log_creauto_$(Get-Date -Format 'yyyyMMdd_HHmmss').csv"
-try {
-    $log = @()
-    if ($log.Count -gt 0) {
-        $log | Export-Csv -Path $logPath -NoTypeInformation -Encoding UTF8
-    }
-} catch { }
-
 Write-Host ''
 Write-LabOk 'Creación automática finalizada.'
-Write-LabInfo 'Las vulnerabilidades se aplican desde menu.ps1 [5] Crear vulnerabilidad.'

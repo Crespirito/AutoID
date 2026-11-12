@@ -5,32 +5,34 @@
     Crea unidades administrativas (AU) en Entra ID, añade miembros
     (usuarios y grupos) y asigna roles con ámbito de AU.
 
-    Estructura de la sección 'administrativeUnits':
-      - Unidades: { displayName, description, members: [upn|displayName], roles: [{rol, usuario}] }
-
     LICENCIAS:
     - Crear la AU y añadir miembros: disponible en Free.
-    - Asignar un rol con ámbito de AU: el usuario que recibe el rol
-      requiere P1/P2. Si el tenant es Free, la asignación falla con
-      warning (la AU y los miembros se crean igualmente).
-
-    TestDisponible NO bloquea la capacidad en Free. Solo comprueba que
-    hay sesión. La comprobación de P1 se hace en el momento de asignar
-    roles: si falla, se marca como 'fallido' y se avisa.
+    - Asignar un rol con ámbito de AU: requiere P1/P2.
 
     SEGURIDAD DE PREEXISTENTES:
-    - Si la AU ya existía antes del laboratorio (snapshot), se marca
-      'preexistente' y no se modifica.
+    - Si el snapshot pre-lab contiene la AU, se marca 'preexistente'
+      y no se modifica.
+    - Si el snapshot NO contiene la clave 'administrativeUnits' (esto
+      ocurre hoy porque lib_creadores.ps1 no la rellena), la capacidad
+      hace una consulta puntual a Graph y, si la AU existe y no está
+      en $Contexto.ObjetosCreados['AdministrativeUnits'], la marca como
+      'preexistente' y no la toca.
     - Los miembros y roles de una AU preexistente no se tocan.
 
-    NIVEL: P1 (el nivel mínimo para la parte de roles; la creación de
-    la AU en sí está disponible en Free).
+    DEPENDENCIAS: Usuarios, Grupos.
+    NIVEL: P1.
+.NOTES
+    Requiere PowerShell 7.
 #>
+#Requires -Version 7.0
+
+# Set-StrictMode -Version Latest
 
 $Capacidad = @{
     Nombre      = 'AdministrativeUnits'
+    Descripcion = 'Unidades administrativas (AUs)'
     SeccionJson = 'administrativeUnits'
-    Alias       = @('administrativeUnits','unidadesAdministrativas','unidades_administrativas','adminUnits')
+    Alias       = @('unidadesAdministrativas','unidades_administrativas','adminUnits')
     Nivel       = 'P1'
     DependeDe   = @('Usuarios','Grupos')
     PermisosApp = @('AdministrativeUnit.ReadWrite.All','RoleManagement.ReadWrite.Directory','User.Read.All','Group.Read.All')
@@ -40,8 +42,6 @@ $Capacidad = @{
         if (-not (Test-LabGraphSession)) {
             return [pscustomobject]@{ Disponible = $false; Motivo = 'Sin sesión de Graph' }
         }
-        # Crear AU y añadir miembros funciona en Free.
-        # Los roles scoped requieren P1/P2, pero eso se comprueba al asignarlos.
         return [pscustomobject]@{ Disponible = $true; Motivo = $null }
     }
 
@@ -92,29 +92,54 @@ $Capacidad = @{
 
         $creados = @()
 
-        foreach ($auDef in @($Def)) {
-            $displayName = $auDef.displayName
-            $description = if ($auDef.PSObject.Properties['description']) { $auDef.description } else { '' }
-
-            # --- 1. Snapshot pre-lab ---
+        # N3: helper local de preexistencia
+        $esPreexistente = {
+            param($displayName, $objectIdExistente)
+            # 1. Snapshot global (si existe la clave)
             if ($Contexto.SnapshotPreLab -and
                 $Contexto.SnapshotPreLab.ContainsKey('administrativeUnits') -and
                 $Contexto.SnapshotPreLab.administrativeUnits.ContainsKey($displayName)) {
-                Write-LabWarn "La unidad administrativa '$displayName' ya existía antes del laboratorio. No se adopta."
-                $creados += [pscustomobject]@{
-                    tipo          = 'AdministrativeUnit'
-                    displayName   = $displayName
-                    objectId      = $Contexto.SnapshotPreLab.administrativeUnits[$displayName]
-                    estadoDetalle = 'preexistente'
-                }
-                continue
+                return $true
             }
+            # 2. ¿Está en ObjetosCreados de esta sesión? -> reutilización legítima
+            if ($Contexto.ContainsKey('ObjetosCreados') -and
+                $Contexto.ObjetosCreados.ContainsKey('AdministrativeUnits')) {
+                foreach ($o in @($Contexto.ObjetosCreados['AdministrativeUnits'])) {
+                    if ($o.datos -and $o.datos.objectId -and $o.datos.objectId -eq $objectIdExistente) {
+                        return $false
+                    }
+                }
+            }
+            # 3. Existe en el tenant pero no lo creamos nosotros -> preexistente
+            return $true
+        }
 
-            # --- 2. ¿Existe ya? ---
-            $existing = Get-MgDirectoryAdministrativeUnit -Filter "displayName eq '$displayName'" -ErrorAction SilentlyContinue
-            if ($existing) {
-                if ($existing -is [array]) { $existing = $existing[0] }
-                Write-Verbose "   -> AU existe: $displayName (reutilizada)"
+        foreach ($auDef in @($Def)) {
+            $displayName = $auDef.displayName
+            $description = if ($auDef.PSObject.Properties['description'] -and $null -ne $auDef.description) { $auDef.description } else { '' }
+
+            # --- 1. ¿Existe ya en el tenant? (consulta puntual) ---
+            # N14: escapar comillas simples en el filtro OData
+            $displayNameEscapado = $displayName -replace "'","''"
+            $existing = Get-MgDirectoryAdministrativeUnit -Filter "displayName eq '$displayNameEscapado'" -ErrorAction SilentlyContinue
+            if ($existing -is [array]) { $existing = $existing[0] }
+            $existeEnTenant = ($null -ne $existing)
+
+            # --- 2. N3: decidir si es preexistente ---
+            if ($existeEnTenant) {
+                $idExistente = $existing.Id
+                if (& $esPreexistente $displayName $idExistente) {
+                    Write-LabWarn "AU '$displayName' ya existía antes del laboratorio. No se adopta ni modifica."
+                    $creados += [pscustomobject]@{
+                        tipo          = 'AdministrativeUnit'
+                        displayName   = $displayName
+                        objectId      = $idExistente
+                        estadoDetalle = 'preexistente'
+                    }
+                    continue
+                }
+                # Reutilización legítima (creada en esta misma sesión)
+                Write-Verbose "   -> AU existe: $displayName (reutilizada en esta sesión)"
                 $au = $existing
                 $estadoDetalle = 'reutilizado'
             } else {
@@ -141,15 +166,17 @@ $Capacidad = @{
                 foreach ($m in @($auDef.members)) {
                     $miembroId = $null
                     $miembroTipo = $null
-
                     $upn = $m -replace '\{tenant\}', $Contexto.TenantDomain
+
                     $user = Get-MgUser -UserId $upn -ErrorAction SilentlyContinue
                     if ($user) {
                         if ($user -is [array]) { $user = $user[0] }
                         $miembroId = $user.Id
                         $miembroTipo = 'Usuario'
                     } else {
-                        $group = Get-MgGroup -Filter "displayName eq '$m'" -ErrorAction SilentlyContinue
+                        # N14: escapar comillas simples
+                        $mEscapado = $m -replace "'","''"
+                        $group = Get-MgGroup -Filter "displayName eq '$mEscapado'" -ErrorAction SilentlyContinue
                         if ($group) {
                             if ($group -is [array]) { $group = $group[0] }
                             $miembroId = $group.Id
@@ -164,17 +191,15 @@ $Capacidad = @{
 
                     $miembrosActuales = Get-MgDirectoryAdministrativeUnitMember -AdministrativeUnitId $au.Id -All -ErrorAction SilentlyContinue
                     $yaEsMiembro = $false
-                    foreach ($ma in $miembrosActuales) {
+                    foreach ($ma in @($miembrosActuales)) {
                         if ($ma.Id -eq $miembroId) { $yaEsMiembro = $true; break }
                     }
 
                     if ($yaEsMiembro) {
-                        Write-Verbose "   -> $m ya es miembro de '$displayName'"
                         $estadoMiembro = 'reutilizado'
                     } else {
                         $body = @{ '@odata.id' = "https://graph.microsoft.com/v1.0/directoryObjects/$miembroId" }
                         $null = New-MgDirectoryAdministrativeUnitMemberByRef -AdministrativeUnitId $au.Id -BodyParameter $body -ErrorAction Stop
-                        Write-Verbose "   -> $m añadido a '$displayName'"
                         $estadoMiembro = 'creado'
                     }
 
@@ -202,7 +227,9 @@ $Capacidad = @{
                     }
                     if ($user -is [array]) { $user = $user[0] }
 
-                    $roleDef = Get-MgRoleManagementDirectoryRoleDefinition -Filter "displayName eq '$rolNombre'" -ErrorAction SilentlyContinue
+                    # N14: escapar comillas simples
+                    $rolEscapado = $rolNombre -replace "'","''"
+                    $roleDef = Get-MgRoleManagementDirectoryRoleDefinition -Filter "displayName eq '$rolEscapado'" -ErrorAction SilentlyContinue
                     if (-not $roleDef) {
                         Write-LabWarn "Rol '$rolNombre' no encontrado; se omite."
                         continue
@@ -218,7 +245,6 @@ $Capacidad = @{
                     }
 
                     if ($yaAsignado) {
-                        Write-Verbose "   -> $upn ya tiene rol '$rolNombre' en AU '$displayName'"
                         $estadoRol = 'reutilizado'
                     } else {
                         $body = @{
@@ -228,10 +254,9 @@ $Capacidad = @{
                         }
                         try {
                             $null = New-MgRoleManagementDirectoryRoleAssignment -BodyParameter $body -ErrorAction Stop
-                            Write-Verbose "   -> $upn asignado a rol '$rolNombre' en AU '$displayName'"
                             $estadoRol = 'creado'
                         } catch {
-                            Write-LabWarn "No se pudo asignar rol '$rolNombre' a '$upn' en AU '$displayName' (requiere P1/P2 para el administrador): $($_.Exception.Message)"
+                            Write-LabWarn "No se pudo asignar rol '$rolNombre' a '$upn' en AU '$displayName': $($_.Exception.Message)"
                             $estadoRol = 'fallido'
                         }
                     }
@@ -265,6 +290,7 @@ $Capacidad = @{
                 return $true
             } catch {
                 if ($_.Exception.Message -match '404|not found|does not exist') { return $true }
+                Write-LabWarn "No se pudo quitar el miembro '$memberId' de la AU '$auId': $($_.Exception.Message)"
                 return $false
             }
         }
@@ -289,6 +315,7 @@ $Capacidad = @{
                 return $true
             } catch {
                 if ($_.Exception.Message -match '404|not found|does not exist') { return $true }
+                Write-LabWarn "No se pudo quitar el rol de la AU '$auId': $($_.Exception.Message)"
                 return $false
             }
         }
@@ -304,7 +331,9 @@ $Capacidad = @{
                     $au = Get-MgDirectoryAdministrativeUnit -AdministrativeUnitId $objectIdEsperado -ErrorAction SilentlyContinue
                 }
                 if (-not $au -and $displayName) {
-                    $au = Get-MgDirectoryAdministrativeUnit -Filter "displayName eq '$displayName'" -ErrorAction SilentlyContinue
+                    # N14: escapar comillas simples
+                    $dnEscapado = $displayName -replace "'","''"
+                    $au = Get-MgDirectoryAdministrativeUnit -Filter "displayName eq '$dnEscapado'" -ErrorAction SilentlyContinue
                 }
                 if (-not $au) { return $true }
                 if ($au -is [array]) { $au = $au[0] }
@@ -368,4 +397,4 @@ $Capacidad = @{
     }
 }
 
-Register-LabCapacidad -Capacidad $Capacidad
+$null = Register-LabCapacidad -Capacidad $Capacidad

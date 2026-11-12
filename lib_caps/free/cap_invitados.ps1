@@ -6,9 +6,8 @@
     'invitados' del escenario.
 
     Un guest es un objeto User con userType = 'Guest'. La invitación se
-    crea con New-MgInvitation, que devuelve un InvitationId y opcionalmente
-    un InviteRedeemUrl. El cleanup borra el usuario guest resultante, no
-    la invitación (que es efímera).
+    crea con New-MgInvitation, que devuelve un InvitationId. El cleanup
+    borra el usuario guest resultante, no la invitación (que es efímera).
 
     SEGURIDAD DE PREEXISTENTES:
     - Si el email del invitado ya corresponde a un usuario en el tenant,
@@ -16,15 +15,20 @@
     - Si el snapshot pre-lab contiene el email, se marca 'preexistente'.
     - Si no existe, se invita y se marca 'creado'.
 
-    DEPENDENCIAS: ninguna (los guests no dependen de usuarios locales).
-
-    NIVEL: Free (B2B collaboration está disponible en Free).
+    DEPENDENCIAS: ninguna.
+    NIVEL: Free.
+.NOTES
+    Requiere PowerShell 7.
 #>
+#Requires -Version 7.0
+
+# Set-StrictMode -Version Latest
 
 $Capacidad = @{
     Nombre      = 'Invitados'
+    Descripcion = 'Usuarios invitados B2B (guests)'
     SeccionJson = 'invitados'
-    Alias       = @('invitados','guests')
+    Alias       = @('guests')
     Nivel       = 'Free'
     DependeDe   = @()
     PermisosApp = @('User.Invite.All','User.ReadWrite.All')
@@ -74,34 +78,39 @@ $Capacidad = @{
         foreach ($inv in @($Def)) {
             $email = $inv.email
             $displayName = $inv.displayName
-            $redirectUrl = if ($inv.PSObject.Properties['redirectUrl'] -and $inv.redirectUrl) {
+            
+            $redirectUrl = if ($inv.PSObject.Properties['redirectUrl'] -and -not [string]::IsNullOrWhiteSpace($inv.redirectUrl)) {
                 $inv.redirectUrl
             } else {
                 'https://myapplications.microsoft.com'
             }
-            $sendMessage = if ($inv.PSObject.Properties['sendMessage'] -and $null -ne $inv.sendMessage) {
-                [bool]$inv.sendMessage
-            } else {
-                $true
+            
+            $sendMessage = $true
+            if ($inv.PSObject.Properties['sendMessage'] -and $null -ne $inv.sendMessage) {
+                $sendMessage = [bool]$inv.sendMessage
             }
+
+            $emailKey = $email.ToLowerInvariant()
 
             # --- 1. Snapshot pre-lab ---
             if ($Contexto.SnapshotPreLab -and
-                $Contexto.SnapshotPreLab.ContainsKey('invitados') -and
-                $Contexto.SnapshotPreLab.invitados.ContainsKey($email.ToLowerInvariant())) {
+                $Contexto.SnapshotPreLab.ContainsKey('usuarios') -and
+                $Contexto.SnapshotPreLab.usuarios.ContainsKey($emailKey)) {
                 Write-LabWarn "El invitado '$email' ya existía antes del laboratorio. No se adopta."
                 $creados += [pscustomobject]@{
                     tipo          = 'Invitado'
                     email         = $email
                     displayName   = $displayName
-                    objectId      = $Contexto.SnapshotPreLab.invitados[$email.ToLowerInvariant()]
+                    objectId      = $Contexto.SnapshotPreLab.usuarios[$emailKey]
                     estadoDetalle = 'preexistente'
                 }
                 continue
             }
 
             # --- 2. ¿Existe ya como usuario en el tenant? ---
-            $existing = Get-MgUser -Filter "mail eq '$email'" -ErrorAction SilentlyContinue
+            # N14: escapado OData
+            $emailEscapado = $email -replace "'","''"
+            $existing = Get-MgUser -Filter "mail eq '$emailEscapado'" -ErrorAction SilentlyContinue
             if ($existing) {
                 if ($existing -is [array]) { $existing = $existing[0] }
                 Write-Verbose "   -> Invitado ya existe: $email (reutilizado)"
@@ -136,10 +145,10 @@ $Capacidad = @{
                 continue
             }
 
-            # El usuario guest se crea en el tenant; buscar su Id
-            # (puede tardar un momento en aparecer; si no, se deja sin objectId)
+            # El usuario guest tarda un momento en crearse en el tenant
             Start-Sleep -Seconds 2
-            $guestUser = Get-MgUser -Filter "mail eq '$email'" -ErrorAction SilentlyContinue
+            # N14: escapado OData
+            $guestUser = Get-MgUser -Filter "mail eq '$emailEscapado'" -ErrorAction SilentlyContinue
             $objectId = $null
             $upn = $null
             if ($guestUser) {
@@ -156,7 +165,6 @@ $Capacidad = @{
                 objectId       = $objectId
                 upn            = $upn
                 invitationId   = $invitacion.Id
-                inviteRedeemUrl = $invitacion.InviteRedeemUrl
                 estadoDetalle  = 'creado'
             }
         }
@@ -173,7 +181,6 @@ $Capacidad = @{
         $email = if ($Objeto.datos) { $Objeto.datos.email } else { $null }
         $upn = if ($Objeto.datos) { $Objeto.datos.upn } else { $null }
 
-        # Si no hay objectId ni upn ni email, no se puede borrar
         if ([string]::IsNullOrWhiteSpace($objectIdEsperado) -and
             [string]::IsNullOrWhiteSpace($upn) -and
             [string]::IsNullOrWhiteSpace($email)) {
@@ -191,13 +198,14 @@ $Capacidad = @{
                 $guestUser = Get-MgUser -UserId $upn -ErrorAction SilentlyContinue
             }
             if (-not $guestUser -and $email) {
-                $guestUser = Get-MgUser -Filter "mail eq '$email'" -ErrorAction SilentlyContinue
+                # N14: escapado OData
+                $emailEscapado = $email -replace "'","''"
+                $guestUser = Get-MgUser -Filter "mail eq '$emailEscapado'" -ErrorAction SilentlyContinue
             }
 
-            if (-not $guestUser) { return $true }  # idempotente
+            if (-not $guestUser) { return $true }
             if ($guestUser -is [array]) { $guestUser = $guestUser[0] }
 
-            # Segunda capa: verificar objectId si lo tenemos
             if (-not [string]::IsNullOrWhiteSpace($objectIdEsperado) -and
                 $guestUser.Id -ne $objectIdEsperado) {
                 Write-LabWarn "El invitado '$email' tiene un objectId distinto al del manifiesto. No se borra."
@@ -227,10 +235,9 @@ $Capacidad = @{
             return $null
         }
 
-        # Snapshot pre-lab
         if ($Contexto.SnapshotPreLab -and
-            $Contexto.SnapshotPreLab.ContainsKey('invitados') -and
-            $Contexto.SnapshotPreLab.invitados.ContainsKey($email.ToLowerInvariant())) {
+            $Contexto.SnapshotPreLab.ContainsKey('usuarios') -and
+            $Contexto.SnapshotPreLab.usuarios.ContainsKey($email.ToLowerInvariant())) {
             Write-LabWarn "El invitado '$email' ya existía antes del laboratorio. No se puede adoptar."
             return $null
         }
@@ -253,4 +260,4 @@ $Capacidad = @{
     }
 }
 
-Register-LabCapacidad -Capacidad $Capacidad
+$null = Register-LabCapacidad -Capacidad $Capacidad

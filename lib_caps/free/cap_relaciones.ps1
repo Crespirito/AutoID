@@ -8,27 +8,25 @@
     TIPOS SOPORTADOS:
       - membresia: usuario -> grupo (New-MgGroupMemberByRef)
 
-    TIPOS FUTUROS (preparados en el switch):
-      - usuario_au: usuario -> administrative unit
-      - grupo_au: grupo -> administrative unit
-      - sp_grupo: service principal -> grupo
-      - app_owner: usuario -> owner de aplicación
-
     SEGURIDAD DE PREEXISTENTES:
     - Si el grupo es preexistente (snapshot pre-lab), la membresía no se
       aplica y se marca 'preexistente'.
     - Si la membresía ya existía, se marca 'reutilizado'.
 
     DEPENDENCIAS: Usuarios, Grupos.
-
     NIVEL: Free.
+.NOTES
+    Requiere PowerShell 7.
 #>
+#Requires -Version 7.0
+
+# Set-StrictMode -Version Latest
 
 $Capacidad = @{
     Nombre      = 'Relaciones'
     Descripcion = 'Relaciones entre objetos'
     SeccionJson = 'relaciones'
-    Alias       = @('relaciones','Relaciones')
+    Alias       = @('Relaciones')
     Nivel       = 'Free'
     DependeDe   = @('Usuarios','Grupos')
     PermisosApp = @('Group.ReadWrite.All','User.Read.All')
@@ -48,15 +46,17 @@ $Capacidad = @{
         $tiposSoportados = @('membresia')
         foreach ($r in @($Def)) {
             $i++
-            if ([string]::IsNullOrWhiteSpace($r.tipo)) {
+            $tipo = if ($r.PSObject.Properties['tipo']) { $r.tipo } else { $null }
+            
+            if ([string]::IsNullOrWhiteSpace($tipo)) {
                 $errores += "Relación #$i sin 'tipo'."
                 continue
             }
-            if ($r.tipo -notin $tiposSoportados) {
-                $errores += "Relación #$i con tipo no soportado: '$($r.tipo)'. Soportados: $($tiposSoportados -join ', ')."
+            if ($tipo -notin $tiposSoportados) {
+                $errores += "Relación #$i con tipo no soportado: '$tipo'. Soportados: $($tiposSoportados -join ', ')."
                 continue
             }
-            if ($r.tipo -eq 'membresia') {
+            if ($tipo -eq 'membresia') {
                 if ([string]::IsNullOrWhiteSpace($r.usuario)) {
                     $errores += "Relación #$i de tipo 'membresia' sin 'usuario'."
                 }
@@ -72,8 +72,9 @@ $Capacidad = @{
         param($Def)
         $porTipo = @{}
         foreach ($r in @($Def)) {
-            if (-not $porTipo.ContainsKey($r.tipo)) { $porTipo[$r.tipo] = 0 }
-            $porTipo[$r.tipo]++
+            $tipo = if ($r.PSObject.Properties['tipo']) { $r.tipo } else { 'Desconocido' }
+            if (-not $porTipo.ContainsKey($tipo)) { $porTipo[$tipo] = 0 }
+            $porTipo[$tipo]++
         }
         $lineas = @()
         foreach ($t in $porTipo.Keys) {
@@ -88,7 +89,7 @@ $Capacidad = @{
         $creados = @()
 
         foreach ($r in @($Def)) {
-            $tipo = $r.tipo
+            $tipo = if ($r.PSObject.Properties['tipo']) { $r.tipo } else { '' }
 
             switch ($tipo) {
                 'membresia' {
@@ -117,8 +118,9 @@ $Capacidad = @{
                     }
                     if ($usuario -is [array]) { $usuario = $usuario[0] }
 
-                    # Buscar grupo
-                    $grupo = Get-MgGroup -Filter "displayName eq '$nombreGrupo'" -ErrorAction SilentlyContinue
+                    # Buscar grupo (N14: escapado OData)
+                    $nombreGrupoEscapado = $nombreGrupo -replace "'","''"
+                    $grupo = Get-MgGroup -Filter "displayName eq '$nombreGrupoEscapado'" -ErrorAction SilentlyContinue
                     if (-not $grupo) {
                         Write-LabWarn "Grupo '$nombreGrupo' no encontrado para membresía; se omite."
                         continue
@@ -128,9 +130,10 @@ $Capacidad = @{
                     # Comprobar si ya es miembro
                     $miembros = Get-MgGroupMember -GroupId $grupo.Id -All -ErrorAction SilentlyContinue
                     $yaEsMiembro = $false
-                    foreach ($m in $miembros) {
+                    foreach ($m in @($miembros)) {
                         if ($m.Id -eq $usuario.Id) { $yaEsMiembro = $true; break }
                     }
+                    
                     if ($yaEsMiembro) {
                         Write-Verbose "   -> $upn ya es miembro de $nombreGrupo"
                         $estadoDetalle = 'reutilizado'
@@ -208,4 +211,4 @@ $Capacidad = @{
     }
 }
 
-Register-LabCapacidad -Capacidad $Capacidad
+$null = Register-LabCapacidad -Capacidad $Capacidad

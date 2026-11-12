@@ -9,37 +9,39 @@
       {
         displayName,
         state: 'disabled' | 'enabled' | 'enabledForReportingButNotEnforced',
-        conditions: { ... },       # condiciones de la política
-        grantControls: { ... },    # controles de concesión
-        sessionControls?: { ... }  # controles de sesión (opcional)
+        conditions: { ... },
+        grantControls: { ... },
+        sessionControls?: { ... }
       }
 
     LICENCIA:
     El Acceso Condicional requiere Microsoft Entra ID P1 (o P2).
-    TestDisponible consulta los SKUs del tenant y comprueba si existe
-    el plan de servicio 'AAD_PREMIUM' o 'AAD_PREMIUM_P2' con estado
-    'Success'. Si no existe, la capacidad no se ofrece.
+    TestDisponible consulta los SKUs del tenant (cacheada vía
+    Get-LabSubscribedSku).
 
     SEGURIDAD:
     - Por defecto, las políticas se crean en estado 'disabled' para que
       el operador las revise antes de habilitarlas. Si el escenario
       declara 'enabled', se respeta pero se avisa.
-    - No se aplican políticas sobre objetos preexistentes: si la política
-      ya existe (mismo displayName), se marca 'reutilizado'.
-    - La reversión borra la política. Si la política estaba habilitada
-      y bloqueaba el acceso, el operador debe revisarlo manualmente.
+    - Si la política ya existe (mismo displayName), se marca 'reutilizado'.
+    - La reversión borra la política.
 
     NIVEL: P1.
+.NOTES
+    Requiere PowerShell 7.
 #>
+#Requires -Version 7.0
+
+# Set-StrictMode -Version Latest
 
 $Capacidad = @{
-    Nombre       = 'AccesoCondicional'
-    Descripcion  = 'Políticas de Acceso Condicional'
-    SeccionJson  = 'accesoCondicional'
-    Alias        = @('accesoCondicional','acceso_condicional','conditionalAccess')
-    Nivel        = 'P1'
-    DependeDe    = @()
-    PermisosApp  = @('Policy.Read.All','Policy.ReadWrite.ConditionalAccess')
+    Nombre      = 'AccesoCondicional'
+    Descripcion = 'Políticas de Acceso Condicional'
+    SeccionJson = 'accesoCondicional'
+    Alias       = @('acceso_condicional', 'conditionalAccess')
+    Nivel       = 'P1'
+    DependeDe   = @()
+    PermisosApp = @('Policy.Read.All','Policy.ReadWrite.ConditionalAccess')
 
     TestDisponible = {
         param($Contexto)
@@ -47,23 +49,22 @@ $Capacidad = @{
             return [pscustomobject]@{ Disponible = $false; Motivo = 'Sin sesión de Graph' }
         }
         try {
-            $skus = Get-MgSubscribedSku -ErrorAction Stop
+            # N7: usar caché de SKUs
+            $skus = @(Get-LabSubscribedSku)
             $tieneP1 = $false
-            foreach ($sku in @($skus)) {
-                foreach ($plan in @($sku.ServicePlans)) {
-                    if ($plan.ServicePlanName -in @('AAD_PREMIUM','AAD_PREMIUM_P2') -and
-                        $plan.ProvisioningStatus -eq 'Success') {
-                        $tieneP1 = $true
-                        break
+            foreach ($sku in $skus) {
+                if ($sku.PSObject.Properties['ServicePlans'] -and $null -ne $sku.ServicePlans) {
+                    foreach ($plan in @($sku.ServicePlans)) {
+                        if ($plan.ServicePlanName -in @('AAD_PREMIUM','AAD_PREMIUM_P2') -and $plan.ProvisioningStatus -eq 'Success') {
+                            $tieneP1 = $true
+                            break
+                        }
                     }
                 }
                 if ($tieneP1) { break }
             }
             if (-not $tieneP1) {
-                return [pscustomobject]@{
-                    Disponible = $false
-                    Motivo     = 'Requiere licencia Entra ID P1 (AAD_PREMIUM)'
-                }
+                return [pscustomobject]@{ Disponible = $false; Motivo = 'Requiere licencia Entra ID P1 (AAD_PREMIUM)' }
             }
             return [pscustomobject]@{ Disponible = $true; Motivo = $null }
         } catch {
@@ -99,7 +100,7 @@ $Capacidad = @{
     Describir = {
         param($Def)
         $nombres = @($Def) | ForEach-Object {
-            $state = if ($_.PSObject.Properties['state']) { $_.state } else { 'disabled' }
+            $state = if ($_.PSObject.Properties['state'] -and $_.state) { $_.state } else { 'disabled' }
             "$($_.displayName) [$state]"
         }
         return "Políticas de Acceso Condicional ($($nombres.Count)): $($nombres -join ', ')"
@@ -112,49 +113,72 @@ $Capacidad = @{
 
         foreach ($p in @($Def)) {
             $displayName = $p.displayName
-            $state = if ($p.PSObject.Properties['state'] -and $p.state) { $p.state } else { 'disabled' }
+            $state = if ($p.PSObject.Properties['state'] -and -not [string]::IsNullOrWhiteSpace($p.state)) { $p.state } else { 'disabled' }
 
-            # Aviso si la política se crea habilitada
             if ($state -eq 'enabled') {
                 Write-LabWarn "La política '$displayName' se creará HABILITADA. Revisa las condiciones antes de continuar."
             }
 
-            # --- 1. ¿Existe ya? ---
-            $existing = Get-MgIdentityConditionalAccessPolicy -Filter "displayName eq '$displayName'" -ErrorAction SilentlyContinue
-            if ($existing) {
-                if ($existing -is [array]) { $existing = $existing[0] }
-                Write-Verbose "   -> Política existe: $displayName (reutilizada)"
-                $creados += [pscustomobject]@{
-                    tipo          = 'AccesoCondicional'
-                    displayName   = $displayName
-                    objectId      = $existing.Id
-                    state         = $existing.State
-                    estadoDetalle = 'reutilizado'
+            # --- 1. ¿Existe ya? (N14: escapado OData + N21: normalizar array) ---
+            $displayNameEscapado = $displayName -replace "'","''"
+            $existingRaw = Get-MgIdentityConditionalAccessPolicy -Filter "displayName eq '$displayNameEscapado'" -ErrorAction SilentlyContinue
+            $existingArr = @($existingRaw)
+            if ($existingArr.Count -gt 0) {
+                $existing = $existingArr[0]
+                if ($null -ne $existing) {
+                    Write-Verbose "   -> Política existe: $displayName (reutilizada)"
+                    $creados += [pscustomobject]@{
+                        tipo          = 'AccesoCondicional'
+                        displayName   = $displayName
+                        objectId      = $existing.Id
+                        state         = $existing.State
+                        estadoDetalle = 'reutilizado'
+                    }
+                    continue
                 }
-                continue
             }
 
             # --- 2. Construir BodyParameter ---
+            $conditionsHash = @{}
+            if ($p.conditions) {
+                foreach ($prop in $p.conditions.PSObject.Properties) {
+                    $conditionsHash[$prop.Name] = $prop.Value
+                }
+            }
+
+            $grantControlsHash = @{}
+            if ($p.grantControls) {
+                foreach ($prop in $p.grantControls.PSObject.Properties) {
+                    $grantControlsHash[$prop.Name] = $prop.Value
+                }
+            }
+
             $body = @{
                 displayName = $displayName
                 state       = $state
-                conditions  = $p.conditions
-                grantControls = $p.grantControls
+                conditions  = $conditionsHash
+                grantControls = $grantControlsHash
             }
+            
             if ($p.PSObject.Properties['sessionControls'] -and $null -ne $p.sessionControls) {
-                $body['sessionControls'] = $p.sessionControls
+                $sessionControlsHash = @{}
+                foreach ($prop in $p.sessionControls.PSObject.Properties) {
+                    $sessionControlsHash[$prop.Name] = $prop.Value
+                }
+                $body['sessionControls'] = $sessionControlsHash
             }
 
             # --- 3. Crear política ---
             try {
                 $politica = New-MgIdentityConditionalAccessPolicy -BodyParameter $body -ErrorAction Stop
                 if ($null -eq $politica) { throw "New-MgIdentityConditionalAccessPolicy no devolvió objeto para $displayName" }
-                if ($politica -is [array]) { $politica = $politica[0] }
+                $politicaArr = @($politica)
+                $politicaObj = $politicaArr[0]
                 Write-Verbose "   -> Política creada: $displayName (state: $state)"
                 $creados += [pscustomobject]@{
                     tipo          = 'AccesoCondicional'
                     displayName   = $displayName
-                    objectId      = $politica.Id
+                    objectId      = $politicaObj.Id
                     state         = $state
                     estadoDetalle = 'creado'
                 }
@@ -185,9 +209,14 @@ $Capacidad = @{
                 $politica = Get-MgIdentityConditionalAccessPolicy -ConditionalAccessPolicyId $objectIdEsperado -ErrorAction SilentlyContinue
             }
             if (-not $politica -and $displayName) {
-                $politica = Get-MgIdentityConditionalAccessPolicy -Filter "displayName eq '$displayName'" -ErrorAction SilentlyContinue
+                # N14: escapado OData
+                $dnEscapado = $displayName -replace "'","''"
+                $politicaCandidatos = @(Get-MgIdentityConditionalAccessPolicy -Filter "displayName eq '$dnEscapado'" -ErrorAction SilentlyContinue)
+                if ($politicaCandidatos.Count -gt 0 -and $null -ne $politicaCandidatos[0]) {
+                    $politica = $politicaCandidatos[0]
+                }
             }
-            if (-not $politica) { return $true }  # idempotente
+            if (-not $politica) { return $true }
             if ($politica -is [array]) { $politica = $politica[0] }
 
             if (-not [string]::IsNullOrWhiteSpace($objectIdEsperado) -and
@@ -196,7 +225,6 @@ $Capacidad = @{
                 return $false
             }
 
-            # Aviso si la política estaba habilitada
             if ($politica.State -eq 'enabled') {
                 Write-LabWarn "La política '$displayName' estaba HABILITADA. Se va a borrar. Revisa el impacto."
             }
@@ -233,7 +261,6 @@ $Capacidad = @{
             default { 'disabled' }
         }
 
-        # Condiciones básicas: usuarios, aplicaciones, ubicaciones
         Write-Host ''
         Write-Host '  Condiciones (deja vacío para "All"):' -ForegroundColor Cyan
         $incluirUsuarios = Read-Host '  Incluir usuarios (UPN separados por coma, vacío = All)'
@@ -248,7 +275,6 @@ $Capacidad = @{
             }
         }
 
-        # Controles de concesión
         Write-Host ''
         Write-Host '  Controles de concesión:' -ForegroundColor Cyan
         Write-Host '    [1] Requerir MFA'
@@ -270,4 +296,4 @@ $Capacidad = @{
     }
 }
 
-Register-LabCapacidad -Capacidad $Capacidad
+$null = Register-LabCapacidad -Capacidad $Capacidad

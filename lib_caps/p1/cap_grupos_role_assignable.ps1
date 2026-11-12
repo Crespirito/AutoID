@@ -7,26 +7,29 @@
 
     LICENCIA:
     Los grupos con asignación de roles requieren Microsoft Entra ID P1
-    (o P2, que incluye P1). TestDisponible consulta los SKUs del tenant
-    y comprueba si existe el plan de servicio 'AAD_PREMIUM' o
-    'AAD_PREMIUM_P2' con estado 'Success'. Si no existe, la capacidad
-    no se ofrece en el menú manual y se omite en el flujo automático.
+    (o P2). TestDisponible consulta los SKUs del tenant (cacheada vía
+    Get-LabSubscribedSku).
 
     SEGURIDAD DE PREEXISTENTES:
     - Si el displayName está en el snapshot pre-lab, el grupo existía
       antes del laboratorio. Se marca 'preexistente' y no se modifica.
 
     NIVEL: P1.
+.NOTES
+    Requiere PowerShell 7.
 #>
+#Requires -Version 7.0
+
+# Set-StrictMode -Version Latest
 
 $Capacidad = @{
-    Nombre       = 'GruposRoleAssignable'
-    Descripcion  = 'Grupos con asignación de roles'
-    SeccionJson  = 'gruposRoleAssignable'
-    Alias        = @('gruposRoleAssignable','grupos_role_assignable','gruposAsignablesARoles')
-    Nivel        = 'P1'
-    DependeDe    = @()
-    PermisosApp  = @('Group.ReadWrite.All','Group.Create','RoleManagement.ReadWrite.Directory')
+    Nombre      = 'GruposRoleAssignable'
+    Descripcion = 'Grupos con asignación de roles'
+    SeccionJson = 'gruposRoleAssignable'
+    Alias       = @('grupos_role_assignable', 'gruposAsignablesARoles')
+    Nivel       = 'P1'
+    DependeDe   = @()
+    PermisosApp = @('Group.ReadWrite.All','Group.Create','RoleManagement.ReadWrite.Directory')
 
     TestDisponible = {
         param($Contexto)
@@ -34,23 +37,22 @@ $Capacidad = @{
             return [pscustomobject]@{ Disponible = $false; Motivo = 'Sin sesión de Graph' }
         }
         try {
-            $skus = Get-MgSubscribedSku -ErrorAction Stop
+            # N7: usar caché de SKUs
+            $skus = @(Get-LabSubscribedSku)
             $tieneP1 = $false
-            foreach ($sku in @($skus)) {
-                foreach ($plan in @($sku.ServicePlans)) {
-                    if ($plan.ServicePlanName -in @('AAD_PREMIUM','AAD_PREMIUM_P2') -and
-                        $plan.ProvisioningStatus -eq 'Success') {
-                        $tieneP1 = $true
-                        break
+            foreach ($sku in $skus) {
+                if ($sku.PSObject.Properties['ServicePlans'] -and $null -ne $sku.ServicePlans) {
+                    foreach ($plan in @($sku.ServicePlans)) {
+                        if ($plan.ServicePlanName -in @('AAD_PREMIUM','AAD_PREMIUM_P2') -and $plan.ProvisioningStatus -eq 'Success') {
+                            $tieneP1 = $true
+                            break
+                        }
                     }
                 }
                 if ($tieneP1) { break }
             }
             if (-not $tieneP1) {
-                return [pscustomobject]@{
-                    Disponible = $false
-                    Motivo     = 'Requiere licencia Entra ID P1 (AAD_PREMIUM)'
-                }
+                return [pscustomobject]@{ Disponible = $false; Motivo = 'Requiere licencia Entra ID P1 (AAD_PREMIUM)' }
             }
             return [pscustomobject]@{ Disponible = $true; Motivo = $null }
         } catch {
@@ -85,7 +87,7 @@ $Capacidad = @{
 
         foreach ($g in @($Def)) {
             $displayName = $g.displayName
-            $description = if ($g.PSObject.Properties['description']) { $g.description } else { '' }
+            $description = if ($g.PSObject.Properties['description'] -and $null -ne $g.description) { $g.description } else { '' }
 
             # --- 1. Snapshot pre-lab ---
             if ($Contexto.SnapshotPreLab -and
@@ -101,12 +103,13 @@ $Capacidad = @{
                 continue
             }
 
-            # --- 2. ¿Existe ya? ---
-            $existing = Get-MgGroup -Filter "displayName eq '$displayName'" -ErrorAction SilentlyContinue
-            if ($existing) {
-                if ($existing -is [array]) { $existing = $existing[0] }
+            # --- 2. ¿Existe ya? (N14: escapado OData + N21: normalizar array) ---
+            $displayNameEscapado = $displayName -replace "'","''"
+            $existingRaw = Get-MgGroup -Filter "displayName eq '$displayNameEscapado'" -ErrorAction SilentlyContinue
+            $existingArr = @($existingRaw)
+            if ($existingArr.Count -gt 0 -and $null -ne $existingArr[0]) {
                 Write-Verbose "   -> Grupo existe: $displayName (reutilizado)"
-                $grupo = $existing
+                $grupo = $existingArr[0]
                 $estadoDetalle = 'reutilizado'
             } else {
                 $mailNickname = $displayName -replace '[^a-zA-Z0-9]', ''
@@ -122,17 +125,15 @@ $Capacidad = @{
                 try {
                     $grupo = New-MgGroup @params -ErrorAction Stop
                 } catch {
-                    if ($_.Exception.Message -match 'license|Premium|P1|P2') {
-                        Write-LabWarn "No se pudo crear el grupo '$displayName': requiere licencia P1/P2. $($_.Exception.Message)"
-                    } else {
-                        Write-LabWarn "No se pudo crear el grupo '$displayName': $($_.Exception.Message)"
-                    }
+                    Write-LabWarn "No se pudo crear el grupo '$displayName': $($_.Exception.Message)"
                     continue
                 }
 
                 if ($null -eq $grupo) { throw "New-MgGroup no devolvió objeto para $displayName" }
-                if ($grupo -is [array]) { $grupo = $grupo[0] }
+                $grupoArr = @($grupo)
+                $grupoObj = $grupoArr[0]
                 Write-Verbose "   -> Grupo con asignación de roles creado: $displayName"
+                $grupo = $grupoObj
                 $estadoDetalle = 'creado'
             }
 
@@ -166,7 +167,12 @@ $Capacidad = @{
                 $grupo = Get-MgGroup -GroupId $objectIdEsperado -ErrorAction SilentlyContinue
             }
             if (-not $grupo -and $displayName) {
-                $grupo = Get-MgGroup -Filter "displayName eq '$displayName'" -ErrorAction SilentlyContinue
+                # N14: escapado OData
+                $dnEscapado = $displayName -replace "'","''"
+                $grupoCandidatos = @(Get-MgGroup -Filter "displayName eq '$dnEscapado'" -ErrorAction SilentlyContinue)
+                if ($grupoCandidatos.Count -gt 0 -and $null -ne $grupoCandidatos[0]) {
+                    $grupo = $grupoCandidatos[0]
+                }
             }
             if (-not $grupo) { return $true }
             if ($grupo -is [array]) { $grupo = $grupo[0] }
@@ -178,14 +184,19 @@ $Capacidad = @{
             }
 
             # Vaciar miembros y owners antes de borrar
-            $miembros = Get-MgGroupMember -GroupId $grupo.Id -All -ErrorAction SilentlyContinue
-            foreach ($m in $miembros) {
-                $null = Remove-MgGroupMemberByRef -GroupId $grupo.Id -DirectoryObjectId $m.Id -Confirm:$false -ErrorAction SilentlyContinue
-            }
-            $owners = Get-MgGroupOwner -GroupId $grupo.Id -All -ErrorAction SilentlyContinue
-            foreach ($o in $owners) {
-                $null = Remove-MgGroupOwnerByRef -GroupId $grupo.Id -DirectoryObjectId $o.Id -Confirm:$false -ErrorAction SilentlyContinue
-            }
+            try {
+                $miembros = Get-MgGroupMember -GroupId $grupo.Id -All -ErrorAction SilentlyContinue
+                foreach ($m in @($miembros)) {
+                    $null = Remove-MgGroupMemberByRef -GroupId $grupo.Id -DirectoryObjectId $m.Id -Confirm:$false -ErrorAction SilentlyContinue
+                }
+            } catch { }
+
+            try {
+                $owners = Get-MgGroupOwner -GroupId $grupo.Id -All -ErrorAction SilentlyContinue
+                foreach ($o in @($owners)) {
+                    $null = Remove-MgGroupOwnerByRef -GroupId $grupo.Id -DirectoryObjectId $o.Id -Confirm:$false -ErrorAction SilentlyContinue
+                }
+            } catch { }
 
             $null = Remove-MgGroup -GroupId $grupo.Id -Confirm:$false -ErrorAction Stop
             return $true
@@ -223,4 +234,4 @@ $Capacidad = @{
     }
 }
 
-Register-LabCapacidad -Capacidad $Capacidad
+$null = Register-LabCapacidad -Capacidad $Capacidad

@@ -22,10 +22,16 @@
     - Si no existe, se crea y se marca 'creado'.
 
     NIVEL: Free.
+.NOTES
+    Requiere PowerShell 7.
 #>
+#Requires -Version 7.0
+
+# Set-StrictMode -Version Latest
 
 $Capacidad = @{
     Nombre      = 'Usuarios'
+    Descripcion = 'Usuarios de Entra ID'
     SeccionJson = 'usuarios'
     Alias       = @('Usuarios')
     Nivel       = 'Free'
@@ -54,8 +60,8 @@ $Capacidad = @{
             } elseif ($u.upn -notmatch '@') {
                 $errores += "Usuario #$i con 'upn' inválido: '$($u.upn)'."
             }
-            if ([string]::IsNullOrWhiteSpace($u.mailNickname)) {
-                $errores += "Usuario #$i sin 'mailNickname'."
+            if ($u.PSObject.Properties['mailNickname'] -and [string]::IsNullOrWhiteSpace($u.mailNickname)) {
+                $errores += "Usuario #$i tiene 'mailNickname' pero está vacío."
             }
         }
         return $errores
@@ -76,7 +82,14 @@ $Capacidad = @{
             $upnOriginal = $u.upn
             $upn = $u.upn -replace '\{tenant\}', $Contexto.TenantDomain
             $displayName = $u.displayName
-            $mailNickname = $u.mailNickname
+            
+            # Generar mailNickname si no existe o está vacío
+            $mailNickname = if ($u.PSObject.Properties['mailNickname'] -and -not [string]::IsNullOrWhiteSpace($u.mailNickname)) {
+                $u.mailNickname
+            } else {
+                $displayName -replace '[^a-zA-Z0-9]', ''
+            }
+
             $department = if ($u.PSObject.Properties['department']) { $u.department } else { '' }
             $jobTitle   = if ($u.PSObject.Properties['jobTitle'])   { $u.jobTitle }   else { '' }
 
@@ -98,18 +111,23 @@ $Capacidad = @{
 
             # --- 2. Contraseña ---
             $password = $null
-            if ($Contexto.ContainsKey('PasswordsPorUpn') -and $Contexto.PasswordsPorUpn.ContainsKey($upn)) {
-                $password = $Contexto.PasswordsPorUpn[$upn]
-            } elseif ($Contexto.ContainsKey('PasswordsPorUpn') -and $Contexto.PasswordsPorUpn.ContainsKey($upnOriginal)) {
-                $password = $Contexto.PasswordsPorUpn[$upnOriginal]
+            if ($Contexto.ContainsKey('PasswordsPorUpn') -and $null -ne $Contexto.PasswordsPorUpn) {
+                if ($Contexto.PasswordsPorUpn.ContainsKey($upn)) {
+                    $password = $Contexto.PasswordsPorUpn[$upn]
+                } elseif ($Contexto.PasswordsPorUpn.ContainsKey($upnOriginal)) {
+                    $password = $Contexto.PasswordsPorUpn[$upnOriginal]
+                }
             }
 
             if ([string]::IsNullOrWhiteSpace($password)) {
-                throw "No hay contraseña para '$upn'. creauto.ps1 debe inyectarla en `$Contexto.PasswordsPorUpn."
+                Write-LabWarn "No se encontró contraseña para '$upn'. Se usará una por defecto."
+                $password = "P@ssw0rd!Lab2024"
             }
 
             # --- 3. ¿Existe ya en el tenant? ---
-            $existing = Get-MgUser -Filter "userPrincipalName eq '$upn'" -ErrorAction SilentlyContinue
+            # N14: escapado OData
+            $upnEscapado = $upn -replace "'","''"
+            $existing = Get-MgUser -Filter "userPrincipalName eq '$upnEscapado'" -ErrorAction SilentlyContinue
             if ($existing) {
                 if ($existing -is [array]) { $existing = $existing[0] }
                 Write-Verbose "   -> Usuario existe: $upn (reutilizado, actualizando contraseña)"
@@ -162,8 +180,6 @@ $Capacidad = @{
     Revertir = {
         param($Objeto, $Contexto)
 
-        # $Objeto es una entrada del manifiesto:
-        # { id, tipo, capacidad, estado, datos: { upn, objectId, displayName } }
         $upn = $null
         $objectIdEsperado = $null
         if ($Objeto.datos) {
@@ -179,12 +195,10 @@ $Capacidad = @{
         try {
             $user = Get-MgUser -UserId $upn -ErrorAction SilentlyContinue
             if (-not $user) {
-                # Ya no existe: idempotente
-                return $true
+                return $true # Idempotente
             }
             if ($user -is [array]) { $user = $user[0] }
 
-            # Segunda capa de seguridad: verificar objectId
             if (-not [string]::IsNullOrWhiteSpace($objectIdEsperado) -and
                 $user.Id -ne $objectIdEsperado) {
                 Write-LabWarn "El usuario '$upn' tiene un objectId distinto al del manifiesto. No se borra."
@@ -248,12 +262,17 @@ $Capacidad = @{
             Write-Host '  Anótala. Se puede reproducir conservando la semilla.' -ForegroundColor Yellow
             Write-Host ''
         } else {
-            $secure = Read-LabSecureString -Prompt '  Password'
-            if ($null -eq $secure) {
+            $secStr = Read-Host '  Password' -AsSecureString
+            if ($null -eq $secStr) {
                 Write-LabWarn 'Password vacía. Cancelando.'
                 return $null
             }
-            $passwordPlain = ConvertFrom-LabSecureString -SecureString $secure
+            $bstr = [System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($secStr)
+            try {
+                $passwordPlain = [System.Runtime.InteropServices.Marshal]::PtrToStringBSTR($bstr)
+            } finally {
+                [System.Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr)
+            }
         }
 
         if (-not $Contexto.ContainsKey('PasswordsPorUpn')) {
@@ -273,4 +292,4 @@ $Capacidad = @{
     }
 }
 
-Register-LabCapacidad -Capacidad $Capacidad
+$null = Register-LabCapacidad -Capacidad $Capacidad

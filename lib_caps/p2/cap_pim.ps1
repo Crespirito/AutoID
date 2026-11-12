@@ -11,27 +11,30 @@
 
     LICENCIA:
     PIM requiere Microsoft Entra ID P2 (o Entra ID Governance).
-    TestDisponible consulta los SKUs del tenant y comprueba si existe
-    el plan de servicio 'AAD_PREMIUM_P2' con estado 'Success'.
-    Si no existe, la capacidad no se ofrece.
+    TestDisponible consulta los SKUs del tenant (cacheada vía
+    Get-LabSubscribedSku).
 
     SEGURIDAD DE PREEXISTENTES:
     - Si el usuario es preexistente (snapshot pre-lab), no se le asigna
       rol elegible y se marca 'preexistente'.
 
     DEPENDENCIAS: Usuarios.
-
     NIVEL: P2.
+.NOTES
+    Requiere PowerShell 7.
 #>
+#Requires -Version 7.0
+
+# Set-StrictMode -Version Latest
 
 $Capacidad = @{
-    Nombre       = 'Pim'
-    Descripcion  = 'Roles elegibles PIM'
-    SeccionJson  = 'pim'
-    Alias        = @('pim','PIM','rolesElegibles')
-    Nivel        = 'P2'
-    DependeDe    = @('Usuarios')
-    PermisosApp  = @('RoleManagement.ReadWrite.Directory','User.Read.All')
+    Nombre      = 'Pim'
+    Descripcion = 'Roles elegibles PIM'
+    SeccionJson = 'pim'
+    Alias       = @('PIM', 'rolesElegibles')
+    Nivel       = 'P2'
+    DependeDe   = @('Usuarios')
+    PermisosApp = @('RoleManagement.ReadWrite.Directory','User.Read.All')
 
     TestDisponible = {
         param($Contexto)
@@ -39,23 +42,22 @@ $Capacidad = @{
             return [pscustomobject]@{ Disponible = $false; Motivo = 'Sin sesión de Graph' }
         }
         try {
-            $skus = Get-MgSubscribedSku -ErrorAction Stop
+            # N7: usar la caché de SKUs
+            $skus = @(Get-LabSubscribedSku)
             $tieneP2 = $false
-            foreach ($sku in @($skus)) {
-                foreach ($plan in @($sku.ServicePlans)) {
-                    if ($plan.ServicePlanName -eq 'AAD_PREMIUM_P2' -and
-                        $plan.ProvisioningStatus -eq 'Success') {
-                        $tieneP2 = $true
-                        break
+            foreach ($sku in $skus) {
+                if ($sku.PSObject.Properties['ServicePlans'] -and $null -ne $sku.ServicePlans) {
+                    foreach ($plan in @($sku.ServicePlans)) {
+                        if ($plan.ServicePlanName -eq 'AAD_PREMIUM_P2' -and $plan.ProvisioningStatus -eq 'Success') {
+                            $tieneP2 = $true
+                            break
+                        }
                     }
                 }
                 if ($tieneP2) { break }
             }
             if (-not $tieneP2) {
-                return [pscustomobject]@{
-                    Disponible = $false
-                    Motivo     = 'Requiere licencia Entra ID P2 (AAD_PREMIUM_P2)'
-                }
+                return [pscustomobject]@{ Disponible = $false; Motivo = 'Requiere licencia Entra ID P2 (AAD_PREMIUM_P2)' }
             }
             return [pscustomobject]@{ Disponible = $true; Motivo = $null }
         } catch {
@@ -78,7 +80,8 @@ $Capacidad = @{
             }
             if ($p.PSObject.Properties['duracion'] -and $p.duracion) {
                 if ($p.duracion -notmatch '^PT\d+[HM]$') {
-                    $errores += "Rol PIM #`${i}: 'duracion' inválida ('$($p.duracion)'). Formato esperado: PT8H, PT30M, etc."
+                    # CORREGIDO: uso de operador -f para evitar el conflicto con ':'
+                    $errores += ("Rol PIM #{0}: 'duracion' inválida ('{1}'). Formato esperado: PT8H, PT30M, etc." -f $i, $p.duracion)
                 }
             }
         }
@@ -99,12 +102,8 @@ $Capacidad = @{
         foreach ($p in @($Def)) {
             $upn = $p.usuario -replace '\{tenant\}', $Contexto.TenantDomain
             $rolNombre = $p.rol
-            $duracion = if ($p.PSObject.Properties['duracion'] -and $p.duracion) { $p.duracion } else { 'PT8H' }
-            $justificacion = if ($p.PSObject.Properties['justificacion'] -and $p.justificacion) {
-                $p.justificacion
-            } else {
-                'Asignación de laboratorio'
-            }
+            $duracion = if ($p.PSObject.Properties['duracion'] -and -not [string]::IsNullOrWhiteSpace($p.duracion)) { $p.duracion } else { 'PT8H' }
+            $justificacion = if ($p.PSObject.Properties['justificacion'] -and -not [string]::IsNullOrWhiteSpace($p.justificacion)) { $p.justificacion } else { 'Asignación de laboratorio' }
 
             # --- 1. Snapshot pre-lab ---
             if ($Contexto.SnapshotPreLab -and
@@ -128,8 +127,9 @@ $Capacidad = @{
             }
             if ($user -is [array]) { $user = $user[0] }
 
-            # --- 3. Buscar rol ---
-            $roleDef = Get-MgRoleManagementDirectoryRoleDefinition -Filter "displayName eq '$rolNombre'" -ErrorAction SilentlyContinue
+            # --- 3. Buscar rol (N14: escapar OData) ---
+            $rolEscapado = $rolNombre -replace "'","''"
+            $roleDef = Get-MgRoleManagementDirectoryRoleDefinition -Filter "displayName eq '$rolEscapado'" -ErrorAction SilentlyContinue
             if (-not $roleDef) {
                 Write-LabWarn "Rol '$rolNombre' no encontrado; se omite."
                 continue
@@ -142,7 +142,7 @@ $Capacidad = @{
                 -All -ErrorAction SilentlyContinue
             $yaElegible = $false
             foreach ($r in @($requests)) {
-                if ($r.Status -eq 'Provisioned' -and $r.DirectoryScopeId -eq '/') {
+                if ($r.PSObject.Properties['Status'] -and $r.Status -eq 'Provisioned' -and $r.DirectoryScopeId -eq '/') {
                     $yaElegible = $true; break
                 }
             }
@@ -203,27 +203,24 @@ $Capacidad = @{
 
         $userId = if ($Objeto.datos) { $Objeto.datos.userId } else { $null }
         $roleDefinitionId = if ($Objeto.datos) { $Objeto.datos.roleDefinitionId } else { $null }
-        $scheduleRequestId = if ($Objeto.datos) { $Objeto.datos.scheduleRequestId } else { $null }
 
-        # Si no hay datos suficientes, no hay nada que revertir
         if (-not $userId -or -not $roleDefinitionId) {
             return $true
         }
 
         try {
-            # Buscar la request elegible activa
             $requests = Get-MgRoleManagementDirectoryRoleEligibilityScheduleRequest `
                 -Filter "principalId eq '$userId' and roleDefinitionId eq '$roleDefinitionId'" `
                 -All -ErrorAction SilentlyContinue
 
             $encontrada = $null
             foreach ($r in @($requests)) {
-                if ($r.Status -eq 'Provisioned' -and $r.DirectoryScopeId -eq '/') {
+                if ($r.PSObject.Properties['Status'] -and $r.Status -eq 'Provisioned' -and $r.DirectoryScopeId -eq '/') {
                     $encontrada = $r; break
                 }
             }
 
-            if (-not $encontrada) { return $true }  # idempotente
+            if (-not $encontrada) { return $true }
 
             $null = Remove-MgRoleManagementDirectoryRoleEligibilityScheduleRequest `
                 -UnifiedRoleEligibilityScheduleRequestId $encontrada.Id `
@@ -271,4 +268,4 @@ $Capacidad = @{
     }
 }
 
-Register-LabCapacidad -Capacidad $Capacidad
+$null = Register-LabCapacidad -Capacidad $Capacidad

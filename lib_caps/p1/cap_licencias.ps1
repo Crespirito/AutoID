@@ -8,9 +8,9 @@
     Estructura de la sección 'licencias':
       { usuario, skuPartNumber, disabledPlans?: [servicePlanName] }
 
-    El SkuId se resuelve desde Get-MgSubscribedSku usando el SkuPartNumber
-    (por ejemplo 'SPE_E5', 'AAD_PREMIUM', 'ENTERPRISEPACK'). Si el tenant
-    no tiene ese SKU suscrito, se avisa y se omite.
+    El SkuId se resuelve desde Get-LabSubscribedSku (cacheada) usando el
+    SkuPartNumber (por ejemplo 'SPE_E5', 'AAD_PREMIUM', 'ENTERPRISEPACK').
+    Si el tenant no tiene ese SKU suscrito, se avisa y se omite.
 
     SEGURIDAD DE PREEXISTENTES:
     - Si el usuario es preexistente (snapshot pre-lab), no se le asigna
@@ -19,19 +19,22 @@
     - Si no, se asigna y se marca 'creado'.
 
     DEPENDENCIAS: Usuarios (necesita el objectId del usuario).
-
-    NIVEL: Free (asignar licencias no requiere P1/P2 para el operador;
-    el tenant debe tener los SKUs suscritos).
+    NIVEL: Free.
+.NOTES
+    Requiere PowerShell 7.
 #>
+#Requires -Version 7.0
+
+# Set-StrictMode -Version Latest
 
 $Capacidad = @{
-    Nombre       = 'Licencias'
-    Descripcion  = 'Licencias de Microsoft 365'
-    SeccionJson  = 'licencias'
-    Alias        = @('licencias','licenses')
-    Nivel        = 'Free'
-    DependeDe    = @('Usuarios')
-    PermisosApp  = @('LicenseAssignment.ReadWrite.All','User.Read.All','Organization.Read.All')
+    Nombre      = 'Licencias'
+    Descripcion = 'Licencias de Microsoft 365'
+    SeccionJson = 'licencias'
+    Alias       = @('licenses')
+    Nivel       = 'Free'
+    DependeDe   = @('Usuarios')
+    PermisosApp = @('LicenseAssignment.ReadWrite.All','User.Read.All','Organization.Read.All')
 
     TestDisponible = {
         param($Contexto)
@@ -75,12 +78,14 @@ $Capacidad = @{
 
         $creados = @()
 
-        # Cache de SKUs del tenant
+        # N7: cache de SKUs vía Get-LabSubscribedSku
         $skusTenant = @{}
         try {
-            $skus = Get-MgSubscribedSku -All -ErrorAction Stop
-            foreach ($sku in @($skus)) {
-                $skusTenant[$sku.SkuPartNumber] = $sku
+            $skus = @(Get-LabSubscribedSku)
+            foreach ($sku in $skus) {
+                if ($sku.PSObject.Properties['SkuPartNumber'] -and $sku.SkuPartNumber) {
+                    $skusTenant[$sku.SkuPartNumber] = $sku
+                }
             }
         } catch {
             Write-LabWarn "No se pudieron consultar los SKUs del tenant: $($_.Exception.Message)"
@@ -113,7 +118,7 @@ $Capacidad = @{
             $skuId = $sku.SkuId
 
             # --- 3. Buscar usuario ---
-            $user = Get-MgUser -UserId $upn -ErrorAction SilentlyContinue
+            $user = Get-MgUser -UserId $upn -Property 'id,assignedLicenses' -ErrorAction SilentlyContinue
             if (-not $user) {
                 Write-LabWarn "Usuario '$upn' no encontrado para asignar licencia; se omite."
                 continue
@@ -122,7 +127,7 @@ $Capacidad = @{
 
             # --- 4. Comprobar si ya tiene la licencia ---
             $yaTiene = $false
-            if ($user.AssignedLicenses) {
+            if ($user.PSObject.Properties['AssignedLicenses'] -and $null -ne $user.AssignedLicenses) {
                 foreach ($al in @($user.AssignedLicenses)) {
                     if ($al.SkuId -eq $skuId) { $yaTiene = $true; break }
                 }
@@ -141,15 +146,15 @@ $Capacidad = @{
                 continue
             }
 
-            # --- 5. Construir AddLicenses ---
-            $addLicense = @{ SkuId = $skuId }
-
+            # --- 5. Construir AddLicenses con DisabledPlans SIEMPRE presente (N17) ---
+            $disabledIds = @()
             if ($l.PSObject.Properties['disabledPlans'] -and $null -ne $l.disabledPlans) {
-                $disabledIds = @()
                 foreach ($dpName in @($l.disabledPlans)) {
                     $plan = $null
-                    foreach ($sp in @($sku.ServicePlans)) {
-                        if ($sp.ServicePlanName -eq $dpName) { $plan = $sp; break }
+                    if ($sku.PSObject.Properties['ServicePlans'] -and $null -ne $sku.ServicePlans) {
+                        foreach ($sp in @($sku.ServicePlans)) {
+                            if ($sp.ServicePlanName -eq $dpName) { $plan = $sp; break }
+                        }
                     }
                     if ($plan) {
                         $disabledIds += $plan.ServicePlanId
@@ -157,9 +162,11 @@ $Capacidad = @{
                         Write-LabWarn "El plan '$dpName' no existe en el SKU '$skuPartNumber'; se ignora."
                     }
                 }
-                if ($disabledIds.Count -gt 0) {
-                    $addLicense['DisabledPlans'] = $disabledIds
-                }
+            }
+
+            $addLicense = @{
+                SkuId         = $skuId
+                DisabledPlans = @($disabledIds)
             }
 
             # --- 6. Asignar ---
@@ -191,23 +198,22 @@ $Capacidad = @{
         $skuId = if ($Objeto.datos) { $Objeto.datos.skuId } else { $null }
 
         if (-not $userId -or -not $skuId) {
-            # Preexistente o sin datos: no hay nada que revertir
             return $true
         }
 
         try {
             # Comprobar si el usuario todavía tiene la licencia
             $user = Get-MgUser -UserId $userId -Property 'id,assignedLicenses' -ErrorAction SilentlyContinue
-            if (-not $user) { return $true }  # idempotente
+            if (-not $user) { return $true }
             if ($user -is [array]) { $user = $user[0] }
 
             $tieneLicencia = $false
-            if ($user.AssignedLicenses) {
+            if ($user.PSObject.Properties['AssignedLicenses'] -and $null -ne $user.AssignedLicenses) {
                 foreach ($al in @($user.AssignedLicenses)) {
                     if ($al.SkuId -eq $skuId) { $tieneLicencia = $true; break }
                 }
             }
-            if (-not $tieneLicencia) { return $true }  # idempotente
+            if (-not $tieneLicencia) { return $true }
 
             $null = Set-MgUserLicense -UserId $userId -AddLicenses @() -RemoveLicenses @($skuId) -ErrorAction Stop
             return $true
@@ -228,7 +234,6 @@ $Capacidad = @{
             return $null
         }
 
-        # Snapshot pre-lab
         if ($Contexto.SnapshotPreLab -and
             $Contexto.SnapshotPreLab.ContainsKey('usuarios') -and
             $Contexto.SnapshotPreLab.usuarios.ContainsKey($upn.ToLowerInvariant())) {
@@ -236,10 +241,10 @@ $Capacidad = @{
             return $null
         }
 
-        # Mostrar SKUs disponibles
         try {
-            $skus = Get-MgSubscribedSku -All -ErrorAction SilentlyContinue
-            if ($skus) {
+            # N7: cache de SKUs vía Get-LabSubscribedSku
+            $skus = @(Get-LabSubscribedSku)
+            if ($skus.Count -gt 0) {
                 Write-Host ''
                 Write-Host '  SKUs disponibles en el tenant:' -ForegroundColor Cyan
                 foreach ($s in @($skus)) {
@@ -269,4 +274,4 @@ $Capacidad = @{
     }
 }
 
-Register-LabCapacidad -Capacidad $Capacidad
+$null = Register-LabCapacidad -Capacidad $Capacidad

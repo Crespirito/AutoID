@@ -16,16 +16,19 @@
     - Si no, se crea y se marca 'creado'.
 
     DEPENDENCIAS: Aplicaciones (necesita el appId y el SP de la app).
-
-    NIVEL: Free (app roles no requiere licencia P1/P2 para asignar a
-    usuarios; asignar a grupos sí requiere P1/P2, pero eso lo valida
-    TestDisponible en runtime).
+    NIVEL: Free.
+.NOTES
+    Requiere PowerShell 7.
 #>
+#Requires -Version 7.0
+
+# Set-StrictMode -Version Latest
 
 $Capacidad = @{
     Nombre      = 'AppRoles'
+    Descripcion = 'Roles de aplicación y asignaciones'
     SeccionJson = 'appRoles'
-    Alias       = @('appRoles','app_roles')
+    Alias       = @('app_roles')
     Nivel       = 'Free'
     DependeDe   = @('Aplicaciones')
     PermisosApp = @('Application.ReadWrite.All','AppRoleAssignment.ReadWrite.All','Directory.Read.All')
@@ -44,29 +47,34 @@ $Capacidad = @{
         $i = 0
         foreach ($r in @($Def)) {
             $i++
-            if ([string]::IsNullOrWhiteSpace($r.aplicacion)) {
+            $app = if ($r.PSObject.Properties['aplicacion']) { $r.aplicacion } else { $null }
+            if ([string]::IsNullOrWhiteSpace($app)) {
                 $errores += "AppRole #$i sin 'aplicacion'."
                 continue
             }
-            # Si tiene 'principal', es una asignación
-            if ($r.PSObject.Properties['principal'] -and -not [string]::IsNullOrWhiteSpace($r.principal)) {
+            
+            # ¿Es una asignación o una definición?
+            $esAsignacion = ($r.PSObject.Properties['principal'] -and -not [string]::IsNullOrWhiteSpace($r.principal))
+            
+            if ($esAsignacion) {
                 if ([string]::IsNullOrWhiteSpace($r.value)) {
                     $errores += "Asignación #$i sin 'value' (rol a asignar)."
                 }
             } else {
-                # Es una definición de rol
                 if ([string]::IsNullOrWhiteSpace($r.displayName)) {
                     $errores += "Definición de rol #$i sin 'displayName'."
                 }
                 if ([string]::IsNullOrWhiteSpace($r.value)) {
-                    $errores += "Definición de rol #$i sin 'value'."
+                    $errores += "Definición de rol #${i} sin 'value'."
                 } elseif ($r.value -match '\s') {
-                    $errores += "Definición de rol #`${i}: 'value' no puede contener espacios."
+                    # CORREGIDO: sintaxis de variables
+                    $errores += "Definición de rol #${i}: 'value' no puede contener espacios."
                 }
                 if ($r.PSObject.Properties['allowedMemberTypes'] -and $null -ne $r.allowedMemberTypes) {
                     foreach ($t in @($r.allowedMemberTypes)) {
                         if ($t -notin @('User','Application')) {
-                            $errores += "Definición de rol #`${i}: allowedMemberTypes inválido: '$t'."
+                            # CORREGIDO: sintaxis de variables
+                            $errores += "Definición de rol #${i}: allowedMemberTypes inválido: '$t'."
                         }
                     }
                 }
@@ -104,7 +112,6 @@ $Capacidad = @{
 
         # 3. Aplicar definiciones de rol a cada app
         foreach ($appNombre in $rolesPorApp.Keys) {
-            # Comprobar preexistencia de la app
             if ($Contexto.SnapshotPreLab -and
                 $Contexto.SnapshotPreLab.ContainsKey('aplicaciones') -and
                 $Contexto.SnapshotPreLab.aplicaciones.ContainsKey($appNombre)) {
@@ -120,7 +127,9 @@ $Capacidad = @{
                 continue
             }
 
-            $app = Get-MgApplication -Filter "displayName eq '$appNombre'" -ErrorAction SilentlyContinue
+            # N14: escapado OData
+            $appEscapada = $appNombre -replace "'","''"
+            $app = Get-MgApplication -Filter "displayName eq '$appEscapada'" -ErrorAction SilentlyContinue
             if (-not $app) {
                 Write-LabWarn "Aplicación '$appNombre' no encontrada para definir roles; se omite."
                 continue
@@ -129,17 +138,19 @@ $Capacidad = @{
 
             # Construir lista de appRoles nueva (preservando los existentes)
             $rolesExistentes = @()
-            if ($app.AppRoles) { $rolesExistentes = @($app.AppRoles) }
+            if ($app.PSObject.Properties['AppRoles'] -and $null -ne $app.AppRoles) { 
+                $rolesExistentes = @($app.AppRoles) 
+            }
 
             $rolesNuevos = @()
             $rolesNuevos += $rolesExistentes
 
             foreach ($d in $rolesPorApp[$appNombre]) {
-                # Comprobar si el rol ya existe por value
                 $yaExiste = $false
                 foreach ($r in $rolesExistentes) {
                     if ($r.Value -eq $d.value) { $yaExiste = $true; break }
                 }
+                
                 if ($yaExiste) {
                     Write-Verbose "   -> Rol '$($d.value)' ya existe en '$appNombre'"
                     $creados += [pscustomobject]@{
@@ -159,7 +170,7 @@ $Capacidad = @{
 
                 $rolesNuevos += @{
                     DisplayName         = $d.displayName
-                    Description         = if ($d.PSObject.Properties['description']) { $d.description } else { $d.displayName }
+                    Description         = if ($d.PSObject.Properties['description'] -and $d.description) { $d.description } else { $d.displayName }
                     Value               = $d.value
                     AllowedMemberTypes  = $allowedMemberTypes
                     IsEnabled           = $true
@@ -188,7 +199,6 @@ $Capacidad = @{
             $rolValue = $asig.value
             $principal = $asig.principal
 
-            # Comprobar preexistencia de la app
             if ($Contexto.SnapshotPreLab -and
                 $Contexto.SnapshotPreLab.ContainsKey('aplicaciones') -and
                 $Contexto.SnapshotPreLab.aplicaciones.ContainsKey($appNombre)) {
@@ -203,8 +213,9 @@ $Capacidad = @{
                 continue
             }
 
-            # Buscar app y SP
-            $app = Get-MgApplication -Filter "displayName eq '$appNombre'" -ErrorAction SilentlyContinue
+            # N14: escapado OData
+            $appEscapada = $appNombre -replace "'","''"
+            $app = Get-MgApplication -Filter "displayName eq '$appEscapada'" -ErrorAction SilentlyContinue
             if (-not $app) {
                 Write-LabWarn "Aplicación '$appNombre' no encontrada para asignación; se omite."
                 continue
@@ -218,9 +229,8 @@ $Capacidad = @{
             }
             if ($sp -is [array]) { $sp = $sp[0] }
 
-            # Buscar el rol por value en el SP (appRoles del SP)
             $appRole = $null
-            if ($sp.AppRoles) {
+            if ($sp.PSObject.Properties['AppRoles'] -and $null -ne $sp.AppRoles) {
                 foreach ($ar in @($sp.AppRoles)) {
                     if ($ar.Value -eq $rolValue) { $appRole = $ar; break }
                 }
@@ -232,19 +242,17 @@ $Capacidad = @{
 
             # Resolver principal (usuario o grupo)
             $principalId = $null
-            $principalType = $null
-
             $user = Get-MgUser -UserId $principal -ErrorAction SilentlyContinue
             if ($user) {
                 if ($user -is [array]) { $user = $user[0] }
                 $principalId = $user.Id
-                $principalType = 'User'
             } else {
-                $group = Get-MgGroup -Filter "displayName eq '$principal'" -ErrorAction SilentlyContinue
+                # N14: escapado OData
+                $principalEscapado = $principal -replace "'","''"
+                $group = Get-MgGroup -Filter "displayName eq '$principalEscapado'" -ErrorAction SilentlyContinue
                 if ($group) {
                     if ($group -is [array]) { $group = $group[0] }
                     $principalId = $group.Id
-                    $principalType = 'Group'
                 }
             }
 
@@ -256,7 +264,7 @@ $Capacidad = @{
             # Comprobar si ya está asignado
             $asignacionesExistentes = Get-MgServicePrincipalAppRoleAssignedTo -ServicePrincipalId $sp.Id -All -ErrorAction SilentlyContinue
             $yaAsignado = $false
-            foreach ($a in $asignacionesExistentes) {
+            foreach ($a in @($asignacionesExistentes)) {
                 if ($a.PrincipalId -eq $principalId -and $a.AppRoleId -eq $appRole.Id) {
                     $yaAsignado = $true; break
                 }
@@ -313,19 +321,18 @@ $Capacidad = @{
             $appRoleId = if ($Objeto.datos) { $Objeto.datos.appRoleId } else { $null }
 
             if (-not $spId -or -not $principalId -or -not $appRoleId) {
-                # Preexistente o sin datos: no hay nada que revertir
                 return $true
             }
 
             try {
                 $asignaciones = Get-MgServicePrincipalAppRoleAssignedTo -ServicePrincipalId $spId -All -ErrorAction SilentlyContinue
                 $encontrada = $null
-                foreach ($a in $asignaciones) {
+                foreach ($a in @($asignaciones)) {
                     if ($a.PrincipalId -eq $principalId -and $a.AppRoleId -eq $appRoleId) {
                         $encontrada = $a; break
                     }
                 }
-                if (-not $encontrada) { return $true }  # idempotente
+                if (-not $encontrada) { return $true }
 
                 $null = Remove-MgServicePrincipalAppRoleAssignedTo -ServicePrincipalId $spId -AppRoleAssignmentId $encontrada.Id -Confirm:$false -ErrorAction Stop
                 return $true
@@ -336,9 +343,6 @@ $Capacidad = @{
         }
 
         if ($Objeto.tipo -eq 'AppRole') {
-            # Un rol definido no se puede "borrar" fácilmente sin afectar asignaciones.
-            # El cleanup lo deja como no-revertido; el operador debe borrar la app
-            # completa si quiere eliminar los roles.
             Write-LabWarn "Los roles de aplicación definidos no se revierten individualmente. Borra la aplicación completa si es necesario."
             return $false
         }
@@ -385,10 +389,12 @@ $Capacidad = @{
             }
         }
 
-        $displayName = Read-Host '  DisplayName del rol'
+        $displayName = Read-Host '  DisplayName del rol (ej. Administrador)'
         if ([string]::IsNullOrWhiteSpace($displayName)) { return $null }
-        $value = Read-Host '  Value del rol (sin espacios)'
-        if ([string]::IsNullOrWhiteSpace($value)) { return $null }
+        
+        $valueSugerido = $displayName -replace '[^a-zA-Z0-9]', ''
+        $value = Read-Host "  Value del rol (sin espacios) [$valueSugerido]"
+        if ([string]::IsNullOrWhiteSpace($value)) { $value = $valueSugerido }
 
         Write-Host ''
         Write-Host '  AllowedMemberTypes:' -ForegroundColor Cyan
@@ -406,4 +412,4 @@ $Capacidad = @{
     }
 }
 
-Register-LabCapacidad -Capacidad $Capacidad
+$null = Register-LabCapacidad -Capacidad $Capacidad
