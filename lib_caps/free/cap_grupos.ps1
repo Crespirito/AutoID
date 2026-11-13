@@ -50,7 +50,7 @@ $Capacidad = @{
     Describir = {
         param($Def)
         $nombres = @($Def) | ForEach-Object { $_.displayName }
-        return "Grupos ($($nombres.Count)): $($nombres -join ', ')"
+        return "Grupos ($(@($nombres).Count)): $($nombres -join ', ')"
     }
 
     Crear = {
@@ -60,8 +60,13 @@ $Capacidad = @{
 
         foreach ($g in @($Def)) {
             $displayName = $g.displayName
+<<<<<<< Updated upstream
             $description = if ($g.PSObject.Properties['description']) { $g.description } else { '' }
             $mailNickname = if ($g.PSObject.Properties['mailNickname'] -and $g.mailNickname) {
+=======
+            $description = if ((Get-LabPropiedadValor -Objeto $g -Nombre 'description')) { $g.description } else { '' }
+            $mailNickname = if ((Get-LabPropiedadValor -Objeto $g -Nombre 'mailNickname') -and $g.mailNickname) {
+>>>>>>> Stashed changes
                 $g.mailNickname
             } else {
                 $displayName -replace '[^a-zA-Z0-9]', ''
@@ -122,8 +127,8 @@ $Capacidad = @{
         $displayName = $null
         $objectIdEsperado = $null
         if ($Objeto.datos) {
-            if ($Objeto.datos.PSObject.Properties['displayName']) { $displayName = $Objeto.datos.displayName }
-            if ($Objeto.datos.PSObject.Properties['objectId'])    { $objectIdEsperado = $Objeto.datos.objectId }
+            if ((Get-LabPropiedadValor -Objeto $Objeto.datos -Nombre 'displayName')) { $displayName = $Objeto.datos.displayName }
+            if ((Get-LabPropiedadValor -Objeto $Objeto.datos -Nombre 'objectId'))    { $objectIdEsperado = $Objeto.datos.objectId }
         }
         if ([string]::IsNullOrWhiteSpace($displayName)) {
             Write-LabWarn "Grupo sin displayName en el manifiesto: $($Objeto.id)"

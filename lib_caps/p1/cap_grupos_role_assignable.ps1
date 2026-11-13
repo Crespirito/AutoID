@@ -75,7 +75,7 @@ $Capacidad = @{
     Describir = {
         param($Def)
         $nombres = @($Def) | ForEach-Object { $_.displayName }
-        return "Grupos con asignación de roles ($($nombres.Count)): $($nombres -join ', ')"
+        return "Grupos con asignación de roles ($(@($nombres).Count)): $($nombres -join ', ')"
     }
 
     Crear = {
@@ -85,7 +85,11 @@ $Capacidad = @{
 
         foreach ($g in @($Def)) {
             $displayName = $g.displayName
+<<<<<<< Updated upstream
             $description = if ($g.PSObject.Properties['description']) { $g.description } else { '' }
+=======
+            $description = if ((Get-LabPropiedadValor -Objeto $g -Nombre 'description')) { $g.description } else { '' }
+>>>>>>> Stashed changes
 
             # --- 1. Snapshot pre-lab ---
             if ($Contexto.SnapshotPreLab -and

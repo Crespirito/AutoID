@@ -79,6 +79,24 @@ function Show-LabHeader {
     Write-Host ''
 }
 
+function Write-LabBanner {
+    <#
+    .SYNOPSIS
+        Dibuja un separador de sección sin limpiar la pantalla.
+    .DESCRIPTION
+        Alias de Show-LabBanner con el nombre que usan clean_up.ps1 y otros
+        scripts de flujo. No limpia la pantalla: en mitad de una operación
+        borraría el progreso ya mostrado.
+    .PARAMETER Texto
+        Texto de la sección.
+    #>
+    param(
+        [string]$Texto
+    )
+
+    Show-LabBanner -Texto $Texto
+}
+
 function Show-LabBanner {
     <#
     .SYNOPSIS

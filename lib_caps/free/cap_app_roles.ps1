@@ -49,7 +49,11 @@ $Capacidad = @{
                 continue
             }
             # Si tiene 'principal', es una asignación
+<<<<<<< Updated upstream
             if ($r.PSObject.Properties['principal'] -and -not [string]::IsNullOrWhiteSpace($r.principal)) {
+=======
+            if ((Get-LabPropiedadValor -Objeto $r -Nombre 'principal') -and -not [string]::IsNullOrWhiteSpace($r.principal)) {
+>>>>>>> Stashed changes
                 if ([string]::IsNullOrWhiteSpace($r.value)) {
                     $errores += "Asignación #$i sin 'value' (rol a asignar)."
                 }
@@ -63,7 +67,7 @@ $Capacidad = @{
                 } elseif ($r.value -match '\s') {
                     $errores += "Definición de rol #`${i}: 'value' no puede contener espacios."
                 }
-                if ($r.PSObject.Properties['allowedMemberTypes'] -and $null -ne $r.allowedMemberTypes) {
+                if ((Get-LabPropiedadValor -Objeto $r -Nombre 'allowedMemberTypes') -and $null -ne $r.allowedMemberTypes) {
                     foreach ($t in @($r.allowedMemberTypes)) {
                         if ($t -notin @('User','Application')) {
                             $errores += "Definición de rol #`${i}: allowedMemberTypes inválido: '$t'."
@@ -77,8 +81,8 @@ $Capacidad = @{
 
     Describir = {
         param($Def)
-        $defs = @($Def | Where-Object { -not $_.PSObject.Properties['principal'] -or [string]::IsNullOrWhiteSpace($_.principal) })
-        $asigs = @($Def | Where-Object { $_.PSObject.Properties['principal'] -and -not [string]::IsNullOrWhiteSpace($_.principal) })
+        $defs = @($Def | Where-Object { -not ((Get-LabPropiedadValor -Objeto $_ -Nombre 'principal')) -or [string]::IsNullOrWhiteSpace($_.principal) })
+        $asigs = @($Def | Where-Object { (Get-LabPropiedadValor -Objeto $_ -Nombre 'principal') -and -not [string]::IsNullOrWhiteSpace($_.principal) })
         $lineas = @()
         if ($defs.Count -gt 0) { $lineas += "Roles definidos: $($defs.Count)" }
         if ($asigs.Count -gt 0) { $lineas += "Asignaciones: $($asigs.Count)" }
@@ -91,8 +95,8 @@ $Capacidad = @{
         $creados = @()
 
         # 1. Separar definiciones y asignaciones
-        $definiciones = @($Def | Where-Object { -not $_.PSObject.Properties['principal'] -or [string]::IsNullOrWhiteSpace($_.principal) })
-        $asignaciones = @($Def | Where-Object { $_.PSObject.Properties['principal'] -and -not [string]::IsNullOrWhiteSpace($_.principal) })
+        $definiciones = @($Def | Where-Object { -not ((Get-LabPropiedadValor -Objeto $_ -Nombre 'principal')) -or [string]::IsNullOrWhiteSpace($_.principal) })
+        $asignaciones = @($Def | Where-Object { (Get-LabPropiedadValor -Objeto $_ -Nombre 'principal') -and -not [string]::IsNullOrWhiteSpace($_.principal) })
 
         # 2. Agrupar definiciones por aplicación
         $rolesPorApp = @{}
@@ -153,13 +157,17 @@ $Capacidad = @{
                 }
 
                 $allowedMemberTypes = @('User')
-                if ($d.PSObject.Properties['allowedMemberTypes'] -and $null -ne $d.allowedMemberTypes) {
+                if ((Get-LabPropiedadValor -Objeto $d -Nombre 'allowedMemberTypes') -and $null -ne $d.allowedMemberTypes) {
                     $allowedMemberTypes = @($d.allowedMemberTypes)
                 }
 
                 $rolesNuevos += @{
                     DisplayName         = $d.displayName
+<<<<<<< Updated upstream
                     Description         = if ($d.PSObject.Properties['description']) { $d.description } else { $d.displayName }
+=======
+                    Description         = if ((Get-LabPropiedadValor -Objeto $d -Nombre 'description')) { $d.description } else { $d.displayName }
+>>>>>>> Stashed changes
                     Value               = $d.value
                     AllowedMemberTypes  = $allowedMemberTypes
                     IsEnabled           = $true

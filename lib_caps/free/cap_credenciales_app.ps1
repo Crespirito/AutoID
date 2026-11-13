@@ -52,7 +52,11 @@ $Capacidad = @{
             if ([string]::IsNullOrWhiteSpace($c.displayName)) {
                 $errores += "Credencial #$i sin 'displayName'."
             }
+<<<<<<< Updated upstream
             if ($c.PSObject.Properties['endDateTime'] -and $null -ne $c.endDateTime) {
+=======
+            if ((Get-LabPropiedadValor -Objeto $c -Nombre 'endDateTime') -and $null -ne $c.endDateTime) {
+>>>>>>> Stashed changes
                 try {
                     $fecha = [datetime]$c.endDateTime
                     if ($fecha -lt (Get-Date)) {
@@ -69,7 +73,11 @@ $Capacidad = @{
     Describir = {
         param($Def)
         $nombres = @($Def) | ForEach-Object { "$($_.aplicacion) / $($_.displayName)" }
+<<<<<<< Updated upstream
         return "Credenciales de app ($($nombres.Count)): $($nombres -join ', ')"
+=======
+        return "Credenciales de app ($(@($nombres).Count)): $($nombres -join ', ')"
+>>>>>>> Stashed changes
     }
 
     Crear = {
@@ -126,7 +134,11 @@ $Capacidad = @{
             }
 
             # --- 4. Crear la credencial ---
+<<<<<<< Updated upstream
             $endDateTime = if ($c.PSObject.Properties['endDateTime'] -and $null -ne $c.endDateTime) {
+=======
+            $endDateTime = if ((Get-LabPropiedadValor -Objeto $c -Nombre 'endDateTime') -and $null -ne $c.endDateTime) {
+>>>>>>> Stashed changes
                 [datetime]$c.endDateTime
             } else {
                 (Get-Date).AddYears(1)

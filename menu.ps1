@@ -40,6 +40,10 @@ if (-not $PSScriptRoot) {
 . (Join-Path $PSScriptRoot 'lib_niveles.ps1')
 . (Join-Path $PSScriptRoot 'lib_caps.ps1')
 . (Join-Path $PSScriptRoot 'lib_creadores.ps1')
+<<<<<<< Updated upstream
+=======
+. (Join-Path $PSScriptRoot 'lib_helpers.ps1')
+>>>>>>> Stashed changes
 
 # ============================================================
 # RUTAS A LOS SCRIPTS HIJOS
@@ -395,7 +399,22 @@ function Invoke-CambiarNivel {
     $nuevo = $niveles[[int]$sel]
     try {
         $script:config = Set-LabNivel -Nivel $nuevo -Config $config
+<<<<<<< Updated upstream
         Write-LabOk "Nivel cambiado a $nuevo."
+=======
+        $config = $script:config
+
+        # Recarga del registro de capacidades: el loader se llamaba una sola vez
+        # al arrancar, así que tras cambiar de nivel el registro seguía siendo el
+        # del nivel anterior. Se cargan todos los niveles hasta el elegido, porque
+        # las capacidades de P1/P2 declaran DependeDe sobre las de Free y sin ellas
+        # el registro quedaría vacío.
+        $hasta = @($niveles | Where-Object {
+            (Get-LabNivelOrden -Nivel $_) -le (Get-LabNivelOrden -Nivel $nuevo)
+        })
+        $registradas = Initialize-LabCapacidades -Root (Join-Path $PSScriptRoot 'lib_caps') -Niveles $hasta
+        Write-LabOk "Nivel cambiado a $nuevo. Capacidades recargadas: $registradas."
+>>>>>>> Stashed changes
     } catch {
         Write-LabError "No se pudo cambiar el nivel: $($_.Exception.Message)"
     }
@@ -417,7 +436,11 @@ function Invoke-VerCapacidades {
         Config       = $config
     }
 
+<<<<<<< Updated upstream
     $capacidades = Get-LabCapacidades -Nivel $nivel
+=======
+    $capacidades = @(Get-LabCapacidades -Nivel $nivel)
+>>>>>>> Stashed changes
     foreach ($cap in $capacidades) {
         $nombre = if ($cap.ContainsKey('Descripcion') -and $cap.Descripcion) { $cap.Descripcion } else { $cap.Nombre }
         $estado = 'OK'

@@ -178,7 +178,11 @@ function Get-LabManifiesto {
     $raw = Get-Content -Path $Path -Raw -Encoding UTF8 | ConvertFrom-Json
 
     $version = $null
+<<<<<<< Updated upstream
     if ($raw.PSObject.Properties['manifestVersion']) {
+=======
+    if ((Get-LabPropiedadValor -Objeto $raw -Nombre 'manifestVersion')) {
+>>>>>>> Stashed changes
         $version = [string]$raw.manifestVersion
     }
 
@@ -194,49 +198,66 @@ function Get-LabManifiesto {
     }
 
     $objetos = @()
+<<<<<<< Updated upstream
     if ($raw.PSObject.Properties['objetos'] -and $null -ne $raw.objetos) {
+=======
+    if ((Get-LabPropiedadValor -Objeto $raw -Nombre 'objetos') -and $null -ne $raw.objetos) {
+>>>>>>> Stashed changes
         $objetos = @($raw.objetos)
     }
 
     $vulns = @()
+<<<<<<< Updated upstream
     if ($raw.PSObject.Properties['vulnerabilidades'] -and $null -ne $raw.vulnerabilidades) {
+=======
+    if ((Get-LabPropiedadValor -Objeto $raw -Nombre 'vulnerabilidades') -and $null -ne $raw.vulnerabilidades) {
+>>>>>>> Stashed changes
         $vulns = @($raw.vulnerabilidades)
     }
 
     $objetosNorm = @()
     foreach ($o in $objetos) {
         $objetosNorm += [pscustomobject]@{
-            id        = if ($o.PSObject.Properties['id'])        { $o.id }        else { $null }
-            tipo      = if ($o.PSObject.Properties['tipo'])      { $o.tipo }      else { 'Desconocido' }
-            capacidad = if ($o.PSObject.Properties['capacidad']) { $o.capacidad } else { $null }
-            estado    = if ($o.PSObject.Properties['estado'])    { $o.estado }    else { 'creado' }
-            timestamp = if ($o.PSObject.Properties['timestamp']) { $o.timestamp } else { $null }
-            tenantId  = if ($o.PSObject.Properties['tenantId'])  { $o.tenantId }  else { $null }
-            datos     = if ($o.PSObject.Properties['datos'])     { $o.datos }     else { @{} }
+            id        = if ((Get-LabPropiedadValor -Objeto $o -Nombre 'id'))        { $o.id }        else { $null }
+            tipo      = if ((Get-LabPropiedadValor -Objeto $o -Nombre 'tipo'))      { $o.tipo }      else { 'Desconocido' }
+            capacidad = if ((Get-LabPropiedadValor -Objeto $o -Nombre 'capacidad')) { $o.capacidad } else { $null }
+            estado    = if ((Get-LabPropiedadValor -Objeto $o -Nombre 'estado'))    { $o.estado }    else { 'creado' }
+            timestamp = if ((Get-LabPropiedadValor -Objeto $o -Nombre 'timestamp')) { $o.timestamp } else { $null }
+            tenantId  = if ((Get-LabPropiedadValor -Objeto $o -Nombre 'tenantId'))  { $o.tenantId }  else { $null }
+            datos     = if ((Get-LabPropiedadValor -Objeto $o -Nombre 'datos'))     { $o.datos }     else { @{} }
         }
     }
 
     $vulnsNorm = @()
     foreach ($v in $vulns) {
         $vulnsNorm += [pscustomobject]@{
-            id        = if ($v.PSObject.Properties['id'])        { $v.id }        else { $null }
-            nombre    = if ($v.PSObject.Properties['nombre'])    { $v.nombre }    else { $null }
-            tipo      = if ($v.PSObject.Properties['tipo'])      { $v.tipo }      else { 'Desconocido' }
-            capacidad = if ($v.PSObject.Properties['capacidad']) { $v.capacidad } else { 'Vulnerabilidades' }
-            estado    = if ($v.PSObject.Properties['estado'])    { $v.estado }    else { 'aplicada' }
-            timestamp = if ($v.PSObject.Properties['timestamp']) { $v.timestamp } else { $null }
-            datos     = if ($v.PSObject.Properties['datos'])     { $v.datos }     else { @{} }
+            id        = if ((Get-LabPropiedadValor -Objeto $v -Nombre 'id'))        { $v.id }        else { $null }
+            nombre    = if ((Get-LabPropiedadValor -Objeto $v -Nombre 'nombre'))    { $v.nombre }    else { $null }
+            tipo      = if ((Get-LabPropiedadValor -Objeto $v -Nombre 'tipo'))      { $v.tipo }      else { 'Desconocido' }
+            capacidad = if ((Get-LabPropiedadValor -Objeto $v -Nombre 'capacidad')) { $v.capacidad } else { 'Vulnerabilidades' }
+            estado    = if ((Get-LabPropiedadValor -Objeto $v -Nombre 'estado'))    { $v.estado }    else { 'aplicada' }
+            timestamp = if ((Get-LabPropiedadValor -Objeto $v -Nombre 'timestamp')) { $v.timestamp } else { $null }
+            datos     = if ((Get-LabPropiedadValor -Objeto $v -Nombre 'datos'))     { $v.datos }     else { @{} }
         }
     }
 
     return [pscustomobject]@{
         manifestVersion  = $script:LabManifiestoVersion
+<<<<<<< Updated upstream
         fecha            = if ($raw.PSObject.Properties['fecha'])        { $raw.fecha }        else { $null }
         tenantId         = if ($raw.PSObject.Properties['tenantId'])     { $raw.tenantId }     else { $null }
         tenantDomain     = if ($raw.PSObject.Properties['tenantDomain']) { $raw.tenantDomain } else { $null }
         nivel            = if ($raw.PSObject.Properties['nivel'])        { $raw.nivel }        else { 'Free' }
         escenario        = if ($raw.PSObject.Properties['escenario'])    { $raw.escenario }    else { $null }
         semilla          = if ($raw.PSObject.Properties['semilla'])      { $raw.semilla }      else { $null }
+=======
+        fecha            = if ((Get-LabPropiedadValor -Objeto $raw -Nombre 'fecha'))        { $raw.fecha }        else { $null }
+        tenantId         = if ((Get-LabPropiedadValor -Objeto $raw -Nombre 'tenantId'))     { $raw.tenantId }     else { $null }
+        tenantDomain     = if ((Get-LabPropiedadValor -Objeto $raw -Nombre 'tenantDomain')) { $raw.tenantDomain } else { $null }
+        nivel            = if ((Get-LabPropiedadValor -Objeto $raw -Nombre 'nivel'))        { $raw.nivel }        else { 'Free' }
+        escenario        = if ((Get-LabPropiedadValor -Objeto $raw -Nombre 'escenario'))    { $raw.escenario }    else { $null }
+        semilla          = if ((Get-LabPropiedadValor -Objeto $raw -Nombre 'semilla'))      { $raw.semilla }      else { $null }
+>>>>>>> Stashed changes
         objetos          = $objetosNorm
         vulnerabilidades = $vulnsNorm
     }
@@ -273,10 +294,17 @@ function ConvertTo-LabManifiestoV2 {
         return ('obj-{0:D4}' -f $script:LabContadorV2)
     }
 
+<<<<<<< Updated upstream
     $tenantId = if ($Raw.PSObject.Properties['TenantId']) { $Raw.TenantId } else { $null }
     $ts = if ($Raw.PSObject.Properties['Fecha']) { $Raw.Fecha } else { (Get-Date).ToString('o') }
 
     if ($Raw.PSObject.Properties['Usuarios'] -and $null -ne $Raw.Usuarios) {
+=======
+    $tenantId = if ((Get-LabPropiedadValor -Objeto $Raw -Nombre 'TenantId')) { $Raw.TenantId } else { $null }
+    $ts = if ((Get-LabPropiedadValor -Objeto $Raw -Nombre 'Fecha')) { $Raw.Fecha } else { (Get-Date).ToString('o') }
+
+    if ((Get-LabPropiedadValor -Objeto $Raw -Nombre 'Usuarios') -and $null -ne $Raw.Usuarios) {
+>>>>>>> Stashed changes
         foreach ($upn in @($Raw.Usuarios)) {
             $objetos += [pscustomobject]@{
                 id        = New-IdV2
@@ -290,7 +318,11 @@ function ConvertTo-LabManifiestoV2 {
         }
     }
 
+<<<<<<< Updated upstream
     if ($Raw.PSObject.Properties['Grupos'] -and $null -ne $Raw.Grupos) {
+=======
+    if ((Get-LabPropiedadValor -Objeto $Raw -Nombre 'Grupos') -and $null -ne $Raw.Grupos) {
+>>>>>>> Stashed changes
         foreach ($g in @($Raw.Grupos)) {
             $objetos += [pscustomobject]@{
                 id        = New-IdV2
@@ -304,7 +336,11 @@ function ConvertTo-LabManifiestoV2 {
         }
     }
 
+<<<<<<< Updated upstream
     if ($Raw.PSObject.Properties['Aplicaciones'] -and $null -ne $Raw.Aplicaciones) {
+=======
+    if ((Get-LabPropiedadValor -Objeto $Raw -Nombre 'Aplicaciones') -and $null -ne $Raw.Aplicaciones) {
+>>>>>>> Stashed changes
         foreach ($a in @($Raw.Aplicaciones)) {
             $objetos += [pscustomobject]@{
                 id        = New-IdV2
@@ -318,7 +354,11 @@ function ConvertTo-LabManifiestoV2 {
         }
     }
 
+<<<<<<< Updated upstream
     if ($Raw.PSObject.Properties['ServicePrincipals'] -and $null -ne $Raw.ServicePrincipals) {
+=======
+    if ((Get-LabPropiedadValor -Objeto $Raw -Nombre 'ServicePrincipals') -and $null -ne $Raw.ServicePrincipals) {
+>>>>>>> Stashed changes
         foreach ($spId in @($Raw.ServicePrincipals)) {
             $objetos += [pscustomobject]@{
                 id        = New-IdV2
@@ -333,18 +373,31 @@ function ConvertTo-LabManifiestoV2 {
     }
 
     $vulns = @()
+<<<<<<< Updated upstream
     if ($Raw.PSObject.Properties['Vulnerabilidades'] -and $null -ne $Raw.Vulnerabilidades) {
+=======
+    if ((Get-LabPropiedadValor -Objeto $Raw -Nombre 'Vulnerabilidades') -and $null -ne $Raw.Vulnerabilidades) {
+>>>>>>> Stashed changes
         $contadorV = 0
         foreach ($v in @($Raw.Vulnerabilidades)) {
             $contadorV++
             $vulns += [pscustomobject]@{
                 id        = ('vuln-{0:D4}' -f $contadorV)
+<<<<<<< Updated upstream
                 nombre    = if ($v.PSObject.Properties['nombre']) { $v.nombre } else { $null }
                 tipo      = if ($v.PSObject.Properties['tipo'])   { $v.tipo }   else { 'Desconocido' }
                 capacidad = 'Vulnerabilidades'
                 estado    = 'aplicada'
                 timestamp = $ts
                 datos     = if ($v.PSObject.Properties['objetosAfectados']) { @{ objetosAfectados = $v.objetosAfectados } } else { @{} }
+=======
+                nombre    = if ((Get-LabPropiedadValor -Objeto $v -Nombre 'nombre')) { $v.nombre } else { $null }
+                tipo      = if ((Get-LabPropiedadValor -Objeto $v -Nombre 'tipo'))   { $v.tipo }   else { 'Desconocido' }
+                capacidad = 'Vulnerabilidades'
+                estado    = 'aplicada'
+                timestamp = $ts
+                datos     = if ((Get-LabPropiedadValor -Objeto $v -Nombre 'objetosAfectados')) { @{ objetosAfectados = $v.objetosAfectados } } else { @{} }
+>>>>>>> Stashed changes
             }
         }
     }
@@ -353,7 +406,11 @@ function ConvertTo-LabManifiestoV2 {
         manifestVersion  = '2.0'
         fecha            = $ts
         tenantId         = $tenantId
+<<<<<<< Updated upstream
         tenantDomain     = if ($Raw.PSObject.Properties['TenantDomain']) { $Raw.TenantDomain } else { $null }
+=======
+        tenantDomain     = if ((Get-LabPropiedadValor -Objeto $Raw -Nombre 'TenantDomain')) { $Raw.TenantDomain } else { $null }
+>>>>>>> Stashed changes
         nivel            = 'Free'
         escenario        = $null
         semilla          = $null
@@ -401,12 +458,20 @@ function ConvertTo-LabManifiestoV21 {
     )
 
     $objetosOriginales = @()
+<<<<<<< Updated upstream
     if ($Raw.PSObject.Properties['objetos'] -and $null -ne $Raw.objetos) {
+=======
+    if ((Get-LabPropiedadValor -Objeto $Raw -Nombre 'objetos') -and $null -ne $Raw.objetos) {
+>>>>>>> Stashed changes
         $objetosOriginales = @($Raw.objetos)
     }
 
     $vulnsOriginales = @()
+<<<<<<< Updated upstream
     if ($Raw.PSObject.Properties['vulnerabilidades'] -and $null -ne $Raw.vulnerabilidades) {
+=======
+    if ((Get-LabPropiedadValor -Objeto $Raw -Nombre 'vulnerabilidades') -and $null -ne $Raw.vulnerabilidades) {
+>>>>>>> Stashed changes
         $vulnsOriginales = @($Raw.vulnerabilidades)
     }
 
@@ -416,6 +481,7 @@ function ConvertTo-LabManifiestoV21 {
     # Vulnerabilidades ya existentes en v2 (array propio): conservar
     foreach ($v in $vulnsOriginales) {
         $vulns += [pscustomobject]@{
+<<<<<<< Updated upstream
             id        = if ($v.PSObject.Properties['id'])        { $v.id }        else { $null }
             nombre    = if ($v.PSObject.Properties['nombre'])    { $v.nombre }    else { $null }
             tipo      = if ($v.PSObject.Properties['tipo'])      { $v.tipo }      else { 'Desconocido' }
@@ -423,13 +489,27 @@ function ConvertTo-LabManifiestoV21 {
             estado    = if ($v.PSObject.Properties['estado'])    { $v.estado }    else { 'aplicada' }
             timestamp = if ($v.PSObject.Properties['timestamp']) { $v.timestamp } else { $null }
             datos     = if ($v.PSObject.Properties['datos'])     { $v.datos }     else { @{} }
+=======
+            id        = if ((Get-LabPropiedadValor -Objeto $v -Nombre 'id'))        { $v.id }        else { $null }
+            nombre    = if ((Get-LabPropiedadValor -Objeto $v -Nombre 'nombre'))    { $v.nombre }    else { $null }
+            tipo      = if ((Get-LabPropiedadValor -Objeto $v -Nombre 'tipo'))      { $v.tipo }      else { 'Desconocido' }
+            capacidad = if ((Get-LabPropiedadValor -Objeto $v -Nombre 'capacidad')) { $v.capacidad } else { 'Vulnerabilidades' }
+            estado    = if ((Get-LabPropiedadValor -Objeto $v -Nombre 'estado'))    { $v.estado }    else { 'aplicada' }
+            timestamp = if ((Get-LabPropiedadValor -Objeto $v -Nombre 'timestamp')) { $v.timestamp } else { $null }
+            datos     = if ((Get-LabPropiedadValor -Objeto $v -Nombre 'datos'))     { $v.datos }     else { @{} }
+>>>>>>> Stashed changes
         }
     }
 
     # Separar objetos: vulnerabilidades mal ubicadas vs objetos reales
     foreach ($o in $objetosOriginales) {
+<<<<<<< Updated upstream
         $tipo = if ($o.PSObject.Properties['tipo']) { [string]$o.tipo } else { '' }
         $capacidad = if ($o.PSObject.Properties['capacidad']) { [string]$o.capacidad } else { '' }
+=======
+        $tipo = if ((Get-LabPropiedadValor -Objeto $o -Nombre 'tipo')) { [string]$o.tipo } else { '' }
+        $capacidad = if ((Get-LabPropiedadValor -Objeto $o -Nombre 'capacidad')) { [string]$o.capacidad } else { '' }
+>>>>>>> Stashed changes
 
         $esVulnerabilidad = ($capacidad -eq 'Vulnerabilidades') -or
                             ($tipo -eq 'VulnerabilidadAplicada') -or
@@ -441,7 +521,11 @@ function ConvertTo-LabManifiestoV21 {
         }
 
         # Convertir objeto-vulnerabilidad a vulnerabilidad
+<<<<<<< Updated upstream
         $estadoV2 = if ($o.PSObject.Properties['estado']) { [string]$o.estado } else { 'creado' }
+=======
+        $estadoV2 = if ((Get-LabPropiedadValor -Objeto $o -Nombre 'estado')) { [string]$o.estado } else { 'creado' }
+>>>>>>> Stashed changes
         $estadoV21 = switch ($estadoV2) {
             'creado'       { 'aplicada' }
             'preexistente' { 'preexistente' }
@@ -452,40 +536,68 @@ function ConvertTo-LabManifiestoV21 {
             default        { 'aplicada' }
         }
 
+<<<<<<< Updated upstream
         $datosOriginales = if ($o.PSObject.Properties['datos']) { $o.datos } else { @{} }
 
         # El tipo real de la vulnerabilidad estaba en datos.tipoVulnerabilidad
         $tipoVuln = if ($datosOriginales.PSObject.Properties['tipoVulnerabilidad']) {
+=======
+        $datosOriginales = if ((Get-LabPropiedadValor -Objeto $o -Nombre 'datos')) { $o.datos } else { @{} }
+
+        # El tipo real de la vulnerabilidad estaba en datos.tipoVulnerabilidad
+        $tipoVuln = if ((Get-LabPropiedadValor -Objeto $datosOriginales -Nombre 'tipoVulnerabilidad')) {
+>>>>>>> Stashed changes
             [string]$datosOriginales.tipoVulnerabilidad
         } else {
             $tipo
         }
 
+<<<<<<< Updated upstream
         $nombreVuln = if ($datosOriginales.PSObject.Properties['nombre']) {
+=======
+        $nombreVuln = if ((Get-LabPropiedadValor -Objeto $datosOriginales -Nombre 'nombre')) {
+>>>>>>> Stashed changes
             [string]$datosOriginales.nombre
         } else {
             $null
         }
 
         $vulns += [pscustomobject]@{
+<<<<<<< Updated upstream
             id        = if ($o.PSObject.Properties['id'])        { $o.id }        else { $null }
+=======
+            id        = if ((Get-LabPropiedadValor -Objeto $o -Nombre 'id'))        { $o.id }        else { $null }
+>>>>>>> Stashed changes
             nombre    = $nombreVuln
             tipo      = $tipoVuln
             capacidad = if ($capacidad) { $capacidad } else { 'Vulnerabilidades' }
             estado    = $estadoV21
+<<<<<<< Updated upstream
             timestamp = if ($o.PSObject.Properties['timestamp']) { $o.timestamp } else { $null }
+=======
+            timestamp = if ((Get-LabPropiedadValor -Objeto $o -Nombre 'timestamp')) { $o.timestamp } else { $null }
+>>>>>>> Stashed changes
             datos     = $datosOriginales
         }
     }
 
     return [pscustomobject]@{
         manifestVersion  = '2.1'
+<<<<<<< Updated upstream
         fecha            = if ($Raw.PSObject.Properties['fecha'])        { $Raw.fecha }        else { $null }
         tenantId         = if ($Raw.PSObject.Properties['tenantId'])     { $Raw.tenantId }     else { $null }
         tenantDomain     = if ($Raw.PSObject.Properties['tenantDomain']) { $Raw.tenantDomain } else { $null }
         nivel            = if ($Raw.PSObject.Properties['nivel'])        { $Raw.nivel }        else { 'Free' }
         escenario        = if ($Raw.PSObject.Properties['escenario'])    { $Raw.escenario }    else { $null }
         semilla          = if ($Raw.PSObject.Properties['semilla'])      { $Raw.semilla }      else { $null }
+=======
+        fecha            = if ((Get-LabPropiedadValor -Objeto $Raw -Nombre 'fecha'))        { $Raw.fecha }        else { $null }
+        tenantId         = if ((Get-LabPropiedadValor -Objeto $Raw -Nombre 'tenantId'))     { $Raw.tenantId }     else { $null }
+        tenantDomain     = if ((Get-LabPropiedadValor -Objeto $Raw -Nombre 'tenantDomain')) { $Raw.tenantDomain } else { $null }
+        nivel            = if ((Get-LabPropiedadValor -Objeto $Raw -Nombre 'nivel'))        { $Raw.nivel }        else { 'Free' }
+        escenario        = if ((Get-LabPropiedadValor -Objeto $Raw -Nombre 'escenario'))    { $Raw.escenario }    else { $null }
+        semilla          = if ((Get-LabPropiedadValor -Objeto $Raw -Nombre 'semilla'))      { $Raw.semilla }      else { $null }
+>>>>>>> Stashed changes
         objetos          = $objetos
         vulnerabilidades = $vulns
     }

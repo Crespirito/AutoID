@@ -54,7 +54,7 @@ $Capacidad = @{
             if ([string]::IsNullOrWhiteSpace($p.permiso)) {
                 $errores += "Permiso #$i sin 'permiso' (ej. User.ReadWrite.All)."
             }
-            if ($p.PSObject.Properties['tipo'] -and $p.tipo) {
+            if ((Get-LabPropiedadValor -Objeto $p -Nombre 'tipo') -and $p.tipo) {
                 if ($p.tipo -notin @('application','delegated')) {
                     $errores += "Permiso #$i con 'tipo' inválido: '$($p.tipo)'. Debe ser 'application' o 'delegated'."
                 }
@@ -66,7 +66,7 @@ $Capacidad = @{
     Describir = {
         param($Def)
         $nombres = @($Def) | ForEach-Object { "$($_.aplicacion) -> $($_.permiso)" }
-        return "Permisos de API ($($nombres.Count)): $($nombres -join ', ')"
+        return "Permisos de API ($(@($nombres).Count)): $($nombres -join ', ')"
     }
 
     Crear = {
@@ -85,7 +85,7 @@ $Capacidad = @{
             $appNombre = $p.aplicacion
             $recursoNombre = $p.recurso
             $permisoValor = $p.permiso
-            $tipo = if ($p.PSObject.Properties['tipo'] -and $p.tipo) { $p.tipo } else { 'application' }
+            $tipo = if ((Get-LabPropiedadValor -Objeto $p -Nombre 'tipo') -and $p.tipo) { $p.tipo } else { 'application' }
 
             # --- 1. Snapshot pre-lab ---
             if ($Contexto.SnapshotPreLab -and

@@ -51,7 +51,7 @@ $Capacidad = @{
             if ([string]::IsNullOrWhiteSpace($inv.displayName)) {
                 $errores += "Invitado #$i sin 'displayName'."
             }
-            if ($inv.PSObject.Properties['redirectUrl'] -and $null -ne $inv.redirectUrl) {
+            if ((Get-LabPropiedadValor -Objeto $inv -Nombre 'redirectUrl') -and $null -ne $inv.redirectUrl) {
                 if ($inv.redirectUrl -notmatch '^https?://') {
                     $errores += "Invitado #$i con redirectUrl inválido: '$($inv.redirectUrl)'."
                 }
@@ -63,7 +63,7 @@ $Capacidad = @{
     Describir = {
         param($Def)
         $nombres = @($Def) | ForEach-Object { "$($_.displayName) <$($_.email)>" }
-        return "Invitados ($($nombres.Count)): $($nombres -join ', ')"
+        return "Invitados ($(@($nombres).Count)): $($nombres -join ', ')"
     }
 
     Crear = {
@@ -74,12 +74,20 @@ $Capacidad = @{
         foreach ($inv in @($Def)) {
             $email = $inv.email
             $displayName = $inv.displayName
+<<<<<<< Updated upstream
             $redirectUrl = if ($inv.PSObject.Properties['redirectUrl'] -and $inv.redirectUrl) {
+=======
+            $redirectUrl = if ((Get-LabPropiedadValor -Objeto $inv -Nombre 'redirectUrl') -and $inv.redirectUrl) {
+>>>>>>> Stashed changes
                 $inv.redirectUrl
             } else {
                 'https://myapplications.microsoft.com'
             }
+<<<<<<< Updated upstream
             $sendMessage = if ($inv.PSObject.Properties['sendMessage'] -and $null -ne $inv.sendMessage) {
+=======
+            $sendMessage = if ((Get-LabPropiedadValor -Objeto $inv -Nombre 'sendMessage') -and $null -ne $inv.sendMessage) {
+>>>>>>> Stashed changes
                 [bool]$inv.sendMessage
             } else {
                 $true

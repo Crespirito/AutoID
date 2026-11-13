@@ -64,7 +64,7 @@ $Capacidad = @{
     Describir = {
         param($Def)
         $nombres = @($Def) | ForEach-Object { $_.displayName }
-        return "Usuarios ($($nombres.Count)): $($nombres -join ', ')"
+        return "Usuarios ($(@($nombres).Count)): $($nombres -join ', ')"
     }
 
     Crear = {
@@ -77,8 +77,13 @@ $Capacidad = @{
             $upn = $u.upn -replace '\{tenant\}', $Contexto.TenantDomain
             $displayName = $u.displayName
             $mailNickname = $u.mailNickname
+<<<<<<< Updated upstream
             $department = if ($u.PSObject.Properties['department']) { $u.department } else { '' }
             $jobTitle   = if ($u.PSObject.Properties['jobTitle'])   { $u.jobTitle }   else { '' }
+=======
+            $department = if ((Get-LabPropiedadValor -Objeto $u -Nombre 'department')) { $u.department } else { '' }
+            $jobTitle   = if ((Get-LabPropiedadValor -Objeto $u -Nombre 'jobTitle'))   { $u.jobTitle }   else { '' }
+>>>>>>> Stashed changes
 
             # --- 1. Comprobar snapshot pre-lab ---
             $upnKey = $upn.ToLowerInvariant()
@@ -167,8 +172,8 @@ $Capacidad = @{
         $upn = $null
         $objectIdEsperado = $null
         if ($Objeto.datos) {
-            if ($Objeto.datos.PSObject.Properties['upn'])      { $upn = $Objeto.datos.upn }
-            if ($Objeto.datos.PSObject.Properties['objectId']) { $objectIdEsperado = $Objeto.datos.objectId }
+            if ((Get-LabPropiedadValor -Objeto $Objeto.datos -Nombre 'upn'))      { $upn = $Objeto.datos.upn }
+            if ((Get-LabPropiedadValor -Objeto $Objeto.datos -Nombre 'objectId')) { $objectIdEsperado = $Objeto.datos.objectId }
         }
 
         if ([string]::IsNullOrWhiteSpace($upn)) {

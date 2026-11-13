@@ -76,7 +76,7 @@ $Capacidad = @{
             if ([string]::IsNullOrWhiteSpace($p.rol)) {
                 $errores += "Rol PIM #$i sin 'rol'."
             }
-            if ($p.PSObject.Properties['duracion'] -and $p.duracion) {
+            if ((Get-LabPropiedadValor -Objeto $p -Nombre 'duracion') -and $p.duracion) {
                 if ($p.duracion -notmatch '^PT\d+[HM]$') {
                     $errores += "Rol PIM #`${i}: 'duracion' inválida ('$($p.duracion)'). Formato esperado: PT8H, PT30M, etc."
                 }
@@ -88,7 +88,7 @@ $Capacidad = @{
     Describir = {
         param($Def)
         $nombres = @($Def) | ForEach-Object { "$($_.usuario) -> $($_.rol)" }
-        return "Roles elegibles PIM ($($nombres.Count)): $($nombres -join ', ')"
+        return "Roles elegibles PIM ($(@($nombres).Count)): $($nombres -join ', ')"
     }
 
     Crear = {
@@ -99,8 +99,13 @@ $Capacidad = @{
         foreach ($p in @($Def)) {
             $upn = $p.usuario -replace '\{tenant\}', $Contexto.TenantDomain
             $rolNombre = $p.rol
+<<<<<<< Updated upstream
             $duracion = if ($p.PSObject.Properties['duracion'] -and $p.duracion) { $p.duracion } else { 'PT8H' }
             $justificacion = if ($p.PSObject.Properties['justificacion'] -and $p.justificacion) {
+=======
+            $duracion = if ((Get-LabPropiedadValor -Objeto $p -Nombre 'duracion') -and $p.duracion) { $p.duracion } else { 'PT8H' }
+            $justificacion = if ((Get-LabPropiedadValor -Objeto $p -Nombre 'justificacion') -and $p.justificacion) {
+>>>>>>> Stashed changes
                 $p.justificacion
             } else {
                 'Asignación de laboratorio'

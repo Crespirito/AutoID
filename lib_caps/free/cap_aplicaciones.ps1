@@ -45,14 +45,14 @@ $Capacidad = @{
             if ([string]::IsNullOrWhiteSpace($a.displayName)) {
                 $errores += "Aplicación #$i sin 'displayName'."
             }
-            if ($a.PSObject.Properties['redirectUris'] -and $null -ne $a.redirectUris) {
+            if ((Get-LabPropiedadValor -Objeto $a -Nombre 'redirectUris') -and $null -ne $a.redirectUris) {
                 foreach ($uri in @($a.redirectUris)) {
                     if ($uri -notmatch '^https?://') {
                         $errores += "Aplicación #$i con redirectUri inválido: '$uri'."
                     }
                 }
             }
-            if ($a.PSObject.Properties['signInAudience']) {
+            if ((Get-LabPropiedadValor -Objeto $a -Nombre 'signInAudience')) {
                 $audiencias = @('AzureADMyOrg','AzureADMultipleOrgs','AzureADandPersonalMicrosoftAccount','PersonalMicrosoftAccount')
                 if ($a.signInAudience -notin $audiencias) {
                     $errores += "Aplicación #$i con signInAudience inválido: '$($a.signInAudience)'."
@@ -65,7 +65,7 @@ $Capacidad = @{
     Describir = {
         param($Def)
         $nombres = @($Def) | ForEach-Object { $_.displayName }
-        return "Aplicaciones ($($nombres.Count)): $($nombres -join ', ')"
+        return "Aplicaciones ($(@($nombres).Count)): $($nombres -join ', ')"
     }
 
     Crear = {
@@ -75,13 +75,18 @@ $Capacidad = @{
 
         foreach ($a in @($Def)) {
             $displayName = $a.displayName
+<<<<<<< Updated upstream
             $description = if ($a.PSObject.Properties['description']) { $a.description } else { '' }
             $signInAudience = if ($a.PSObject.Properties['signInAudience'] -and $a.signInAudience) {
+=======
+            $description = if ((Get-LabPropiedadValor -Objeto $a -Nombre 'description')) { $a.description } else { '' }
+            $signInAudience = if ((Get-LabPropiedadValor -Objeto $a -Nombre 'signInAudience') -and $a.signInAudience) {
+>>>>>>> Stashed changes
                 $a.signInAudience
             } else {
                 'AzureADMyOrg'
             }
-            $redirectUris = if ($a.PSObject.Properties['redirectUris'] -and $null -ne $a.redirectUris) {
+            $redirectUris = if ((Get-LabPropiedadValor -Objeto $a -Nombre 'redirectUris') -and $null -ne $a.redirectUris) {
                 @($a.redirectUris)
             } else {
                 @()
@@ -115,7 +120,11 @@ $Capacidad = @{
                     SignInAudience = $signInAudience
                     Description    = $description
                 }
+<<<<<<< Updated upstream
                 if ($redirectUris.Count -gt 0) {
+=======
+                if (@($redirectUris).Count -gt 0) {
+>>>>>>> Stashed changes
                     $params.Web = @{ RedirectUris = $redirectUris }
                 }
 

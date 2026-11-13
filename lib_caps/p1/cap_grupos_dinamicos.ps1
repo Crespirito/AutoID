@@ -76,7 +76,7 @@ $Capacidad = @{
                     $errores += "Grupo dinámico #`${i}: 'membershipRule' debe empezar por '('."
                 }
             }
-            if ($g.PSObject.Properties['processingState'] -and $g.processingState) {
+            if ((Get-LabPropiedadValor -Objeto $g -Nombre 'processingState') -and $g.processingState) {
                 if ($g.processingState -notin @('On','Paused')) {
                     $errores += "Grupo dinámico #`${i}: 'processingState' inválido ('$($g.processingState)'). Debe ser 'On' o 'Paused'."
                 }
@@ -88,7 +88,7 @@ $Capacidad = @{
     Describir = {
         param($Def)
         $nombres = @($Def) | ForEach-Object { $_.displayName }
-        return "Grupos dinámicos ($($nombres.Count)): $($nombres -join ', ')"
+        return "Grupos dinámicos ($(@($nombres).Count)): $($nombres -join ', ')"
     }
 
     Crear = {
@@ -98,9 +98,15 @@ $Capacidad = @{
 
         foreach ($g in @($Def)) {
             $displayName = $g.displayName
+<<<<<<< Updated upstream
             $description = if ($g.PSObject.Properties['description']) { $g.description } else { '' }
             $membershipRule = $g.membershipRule
             $processingState = if ($g.PSObject.Properties['processingState'] -and $g.processingState) {
+=======
+            $description = if ((Get-LabPropiedadValor -Objeto $g -Nombre 'description')) { $g.description } else { '' }
+            $membershipRule = $g.membershipRule
+            $processingState = if ((Get-LabPropiedadValor -Objeto $g -Nombre 'processingState') -and $g.processingState) {
+>>>>>>> Stashed changes
                 $g.processingState
             } else {
                 'On'

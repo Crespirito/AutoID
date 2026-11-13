@@ -271,7 +271,7 @@ $Capacidad = @{
                 $defPim = @([pscustomobject]@{
                     usuario       = $v.parametros.usuario
                     rol           = $v.parametros.rol
-                    duracion      = if ($v.parametros.PSObject.Properties['duracion']) { $v.parametros.duracion } else { 'PT8H' }
+                    duracion      = if ((Get-LabPropiedadValor -Objeto $v.parametros -Nombre 'duracion')) { $v.parametros.duracion } else { 'PT8H' }
                     justificacion = 'Asignación de laboratorio (vulnerabilidad)'
                 })
 
@@ -284,16 +284,16 @@ $Capacidad = @{
 
                 foreach ($o in @($res)) {
                     if ($null -eq $o) { continue }
-                    $estadoDetalle = if ($o.PSObject.Properties['estadoDetalle'] -and $o.estadoDetalle) { $o.estadoDetalle } else { 'creado' }
+                    $estadoDetalle = if ((Get-LabPropiedadValor -Objeto $o -Nombre 'estadoDetalle') -and $o.estadoDetalle) { $o.estadoDetalle } else { 'creado' }
 
                     $datos = @{
                         capacidadAplicadora = 'Pim'
-                        objetoAfectadoObjectId = if ($o.PSObject.Properties['userId']) { $o.userId } else { $null }
-                        userId           = if ($o.PSObject.Properties['userId']) { $o.userId } else { $null }
-                        roleDefinitionId = if ($o.PSObject.Properties['roleDefinitionId']) { $o.roleDefinitionId } else { $null }
-                        scheduleRequestId = if ($o.PSObject.Properties['scheduleRequestId']) { $o.scheduleRequestId } else { $null }
-                        upn              = if ($o.PSObject.Properties['upn']) { $o.upn } else { $null }
-                        rol              = if ($o.PSObject.Properties['rol']) { $o.rol } else { $null }
+                        objetoAfectadoObjectId = if ((Get-LabPropiedadValor -Objeto $o -Nombre 'userId')) { $o.userId } else { $null }
+                        userId           = if ((Get-LabPropiedadValor -Objeto $o -Nombre 'userId')) { $o.userId } else { $null }
+                        roleDefinitionId = if ((Get-LabPropiedadValor -Objeto $o -Nombre 'roleDefinitionId')) { $o.roleDefinitionId } else { $null }
+                        scheduleRequestId = if ((Get-LabPropiedadValor -Objeto $o -Nombre 'scheduleRequestId')) { $o.scheduleRequestId } else { $null }
+                        upn              = if ((Get-LabPropiedadValor -Objeto $o -Nombre 'upn')) { $o.upn } else { $null }
+                        rol              = if ((Get-LabPropiedadValor -Objeto $o -Nombre 'rol')) { $o.rol } else { $null }
                         tipoVulnerabilidad = 'PimEligibleRole'
                     }
 
@@ -318,10 +318,14 @@ $Capacidad = @{
 
             if ($null -eq $res) { continue }
 
-            $estadoDetalle = if ($res.PSObject.Properties['estadoDetalle'] -and $res.estadoDetalle) { $res.estadoDetalle } else { 'creado' }
+            $estadoDetalle = if ((Get-LabPropiedadValor -Objeto $res -Nombre 'estadoDetalle') -and $res.estadoDetalle) { $res.estadoDetalle } else { 'creado' }
 
             # Acumular secretos para bloque final
+<<<<<<< Updated upstream
             if ($res.PSObject.Properties['secretoMostrar'] -and $res.secretoMostrar) {
+=======
+            if ((Get-LabPropiedadValor -Objeto $res -Nombre 'secretoMostrar') -and $res.secretoMostrar) {
+>>>>>>> Stashed changes
                 $secretosMostrados += $res.secretoMostrar
             }
 
@@ -373,14 +377,20 @@ $Capacidad = @{
         param($Objeto, $Contexto)
 
         if ($null -eq $Objeto) { return $false }
-        if (-not $Objeto.PSObject.Properties['datos'] -or $null -eq $Objeto.datos) {
+        if (-not ((Get-LabPropiedadValor -Objeto $Objeto -Nombre 'datos')) -or $null -eq $Objeto.datos) {
             Write-LabWarn "Vulnerabilidad sin 'datos': $($Objeto.id)"
             return $false
         }
 
+<<<<<<< Updated upstream
         $tipo = if ($Objeto.PSObject.Properties['tipo']) { $Objeto.tipo } else { $null }
         if ([string]::IsNullOrWhiteSpace($tipo)) {
             if ($Objeto.datos.PSObject.Properties['tipoVulnerabilidad']) {
+=======
+        $tipo = if ((Get-LabPropiedadValor -Objeto $Objeto -Nombre 'tipo')) { $Objeto.tipo } else { $null }
+        if ([string]::IsNullOrWhiteSpace($tipo)) {
+            if ((Get-LabPropiedadValor -Objeto $Objeto.datos -Nombre 'tipoVulnerabilidad')) {
+>>>>>>> Stashed changes
                 $tipo = $Objeto.datos.tipoVulnerabilidad
             }
         }
@@ -518,7 +528,11 @@ $script:VulnTipos = @{
         Validar = {
             param($v)
             $errores = @()
+<<<<<<< Updated upstream
             if (-not $v.PSObject.Properties['parametros'] -or $null -eq $v.parametros) {
+=======
+            if (-not ((Get-LabPropiedadValor -Objeto $v -Nombre 'parametros')) -or $null -eq $v.parametros) {
+>>>>>>> Stashed changes
                 $errores += "falta 'parametros'."
                 return $errores
             }
@@ -560,7 +574,11 @@ $script:VulnTipos = @{
         Validar = {
             param($v)
             $errores = @()
+<<<<<<< Updated upstream
             if (-not $v.PSObject.Properties['parametros'] -or $null -eq $v.parametros) {
+=======
+            if (-not ((Get-LabPropiedadValor -Objeto $v -Nombre 'parametros')) -or $null -eq $v.parametros) {
+>>>>>>> Stashed changes
                 $errores += "falta 'parametros'."
                 return $errores
             }
@@ -601,14 +619,22 @@ $script:VulnTipos = @{
         Validar = {
             param($v)
             $errores = @()
+<<<<<<< Updated upstream
             if (-not $v.PSObject.Properties['parametros'] -or $null -eq $v.parametros) {
+=======
+            if (-not ((Get-LabPropiedadValor -Objeto $v -Nombre 'parametros')) -or $null -eq $v.parametros) {
+>>>>>>> Stashed changes
                 $errores += "falta 'parametros'."
                 return $errores
             }
             if ([string]::IsNullOrWhiteSpace($v.parametros.aplicacion)) {
                 $errores += "falta 'parametros.aplicacion'."
             }
+<<<<<<< Updated upstream
             if ($v.parametros.PSObject.Properties['dias'] -and $null -ne $v.parametros.dias) {
+=======
+            if ((Get-LabPropiedadValor -Objeto $v.parametros -Nombre 'dias') -and $null -ne $v.parametros.dias) {
+>>>>>>> Stashed changes
                 if ([int]$v.parametros.dias -lt 1 -or [int]$v.parametros.dias -gt 730) {
                     $errores += "'parametros.dias' debe estar entre 1 y 730."
                 }
@@ -644,7 +670,11 @@ $script:VulnTipos = @{
         Validar = {
             param($v)
             $errores = @()
+<<<<<<< Updated upstream
             if (-not $v.PSObject.Properties['parametros'] -or $null -eq $v.parametros) {
+=======
+            if (-not ((Get-LabPropiedadValor -Objeto $v -Nombre 'parametros')) -or $null -eq $v.parametros) {
+>>>>>>> Stashed changes
                 $errores += "falta 'parametros'."
                 return $errores
             }
@@ -654,7 +684,11 @@ $script:VulnTipos = @{
             if ([string]::IsNullOrWhiteSpace($v.parametros.rol)) {
                 $errores += "falta 'parametros.rol'."
             }
+<<<<<<< Updated upstream
             if ($v.parametros.PSObject.Properties['duracion'] -and $v.parametros.duracion) {
+=======
+            if ((Get-LabPropiedadValor -Objeto $v.parametros -Nombre 'duracion') -and $v.parametros.duracion) {
+>>>>>>> Stashed changes
                 if ($v.parametros.duracion -notmatch '^PT\d+[HM]$') {
                     $errores += "'parametros.duracion' inválida ('$($v.parametros.duracion)'). Formato: PT8H, PT30M."
                 }
@@ -676,8 +710,8 @@ $script:VulnTipos = @{
             param($Objetos, $Contexto)
             foreach ($o in @($Objetos)) {
                 if ($null -eq $o -or $null -eq $o.datos) { continue }
-                $userId = if ($o.datos.PSObject.Properties['userId']) { $o.datos.userId } else { $null }
-                $roleDefinitionId = if ($o.datos.PSObject.Properties['roleDefinitionId']) { $o.datos.roleDefinitionId } else { $null }
+                $userId = if ((Get-LabPropiedadValor -Objeto $o.datos -Nombre 'userId')) { $o.datos.userId } else { $null }
+                $roleDefinitionId = if ((Get-LabPropiedadValor -Objeto $o.datos -Nombre 'roleDefinitionId')) { $o.datos.roleDefinitionId } else { $null }
                 if (-not $userId -or -not $roleDefinitionId) { continue }
 
                 try {
@@ -1033,7 +1067,11 @@ $Capacidad['ObtenerClaves'] = {
 
     $claves = @()
     foreach ($v in @($Def)) {
+<<<<<<< Updated upstream
         if ($null -eq $v -or -not $v.PSObject.Properties['parametros'] -or $null -eq $v.parametros) { continue }
+=======
+        if ($null -eq $v -or -not ((Get-LabPropiedadValor -Objeto $v -Nombre 'parametros')) -or $null -eq $v.parametros) { continue }
+>>>>>>> Stashed changes
 
         switch ($v.tipo) {
             'ServicePrincipalOwner' {
@@ -1063,8 +1101,13 @@ $Capacidad['PreRevertir'] = {
 
     foreach ($o in @($Objetos)) {
         if ($null -eq $o) { continue }
+<<<<<<< Updated upstream
         $tipo = if ($o.PSObject.Properties['tipo']) { $o.tipo } else { $null }
         if ([string]::IsNullOrWhiteSpace($tipo) -and $o.datos -and $o.datos.PSObject.Properties['tipoVulnerabilidad']) {
+=======
+        $tipo = if ((Get-LabPropiedadValor -Objeto $o -Nombre 'tipo')) { $o.tipo } else { $null }
+        if ([string]::IsNullOrWhiteSpace($tipo) -and $o.datos -and ((Get-LabPropiedadValor -Objeto $o.datos -Nombre 'tipoVulnerabilidad'))) {
+>>>>>>> Stashed changes
             $tipo = $o.datos.tipoVulnerabilidad
         }
         if ([string]::IsNullOrWhiteSpace($tipo)) { continue }
@@ -1213,7 +1256,11 @@ function Invoke-VulnApplicationSecret {
     param($Vulnerabilidad, $Contexto)
 
     $appNombre = $Vulnerabilidad.parametros.aplicacion
+<<<<<<< Updated upstream
     $dias = if ($Vulnerabilidad.parametros.PSObject.Properties['dias'] -and $null -ne $Vulnerabilidad.parametros.dias) {
+=======
+    $dias = if ((Get-LabPropiedadValor -Objeto $Vulnerabilidad.parametros -Nombre 'dias') -and $null -ne $Vulnerabilidad.parametros.dias) {
+>>>>>>> Stashed changes
         [int]$Vulnerabilidad.parametros.dias
     } else {
         365
@@ -1291,8 +1338,13 @@ function Invoke-RevertirVulnServicePrincipalOwner {
 
     if ($null -eq $Objeto -or $null -eq $Objeto.datos) { return $true }
 
+<<<<<<< Updated upstream
     $spId = if ($Objeto.datos.PSObject.Properties['servicePrincipalId']) { $Objeto.datos.servicePrincipalId } else { $null }
     $dirId = if ($Objeto.datos.PSObject.Properties['directoryObjectId']) { $Objeto.datos.directoryObjectId } else { $null }
+=======
+    $spId = if ((Get-LabPropiedadValor -Objeto $Objeto.datos -Nombre 'servicePrincipalId')) { $Objeto.datos.servicePrincipalId } else { $null }
+    $dirId = if ((Get-LabPropiedadValor -Objeto $Objeto.datos -Nombre 'directoryObjectId')) { $Objeto.datos.directoryObjectId } else { $null }
+>>>>>>> Stashed changes
     if (-not $spId -or -not $dirId) { return $true }
 
     try {
@@ -1316,8 +1368,13 @@ function Invoke-RevertirVulnGroupOwner {
 
     if ($null -eq $Objeto -or $null -eq $Objeto.datos) { return $true }
 
+<<<<<<< Updated upstream
     $groupId = if ($Objeto.datos.PSObject.Properties['groupId']) { $Objeto.datos.groupId } else { $null }
     $dirId = if ($Objeto.datos.PSObject.Properties['directoryObjectId']) { $Objeto.datos.directoryObjectId } else { $null }
+=======
+    $groupId = if ((Get-LabPropiedadValor -Objeto $Objeto.datos -Nombre 'groupId')) { $Objeto.datos.groupId } else { $null }
+    $dirId = if ((Get-LabPropiedadValor -Objeto $Objeto.datos -Nombre 'directoryObjectId')) { $Objeto.datos.directoryObjectId } else { $null }
+>>>>>>> Stashed changes
     if (-not $groupId -or -not $dirId) { return $true }
 
     try {
@@ -1341,8 +1398,13 @@ function Invoke-RevertirVulnApplicationSecret {
 
     if ($null -eq $Objeto -or $null -eq $Objeto.datos) { return $true }
 
+<<<<<<< Updated upstream
     $appId = if ($Objeto.datos.PSObject.Properties['applicationId']) { $Objeto.datos.applicationId } else { $null }
     $keyId = if ($Objeto.datos.PSObject.Properties['keyId']) { $Objeto.datos.keyId } else { $null }
+=======
+    $appId = if ((Get-LabPropiedadValor -Objeto $Objeto.datos -Nombre 'applicationId')) { $Objeto.datos.applicationId } else { $null }
+    $keyId = if ((Get-LabPropiedadValor -Objeto $Objeto.datos -Nombre 'keyId')) { $Objeto.datos.keyId } else { $null }
+>>>>>>> Stashed changes
     if (-not $appId -or -not $keyId) { return $true }
 
     try {

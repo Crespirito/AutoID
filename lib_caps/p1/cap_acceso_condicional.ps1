@@ -81,15 +81,15 @@ $Capacidad = @{
             if ([string]::IsNullOrWhiteSpace($p.displayName)) {
                 $errores += "Política de Acceso Condicional #$i sin 'displayName'."
             }
-            if ($p.PSObject.Properties['state'] -and $p.state) {
+            if ((Get-LabPropiedadValor -Objeto $p -Nombre 'state') -and $p.state) {
                 if ($p.state -notin @('disabled','enabled','enabledForReportingButNotEnforced')) {
                     $errores += "Política #$i con 'state' inválido: '$($p.state)'."
                 }
             }
-            if (-not $p.PSObject.Properties['conditions'] -or $null -eq $p.conditions) {
+            if (-not ((Get-LabPropiedadValor -Objeto $p -Nombre 'conditions')) -or $null -eq $p.conditions) {
                 $errores += "Política #$i sin 'conditions'."
             }
-            if (-not $p.PSObject.Properties['grantControls'] -or $null -eq $p.grantControls) {
+            if (-not ((Get-LabPropiedadValor -Objeto $p -Nombre 'grantControls')) -or $null -eq $p.grantControls) {
                 $errores += "Política #$i sin 'grantControls'."
             }
         }
@@ -99,10 +99,14 @@ $Capacidad = @{
     Describir = {
         param($Def)
         $nombres = @($Def) | ForEach-Object {
+<<<<<<< Updated upstream
             $state = if ($_.PSObject.Properties['state']) { $_.state } else { 'disabled' }
+=======
+            $state = if ((Get-LabPropiedadValor -Objeto $_ -Nombre 'state')) { $_.state } else { 'disabled' }
+>>>>>>> Stashed changes
             "$($_.displayName) [$state]"
         }
-        return "Políticas de Acceso Condicional ($($nombres.Count)): $($nombres -join ', ')"
+        return "Políticas de Acceso Condicional ($(@($nombres).Count)): $($nombres -join ', ')"
     }
 
     Crear = {
@@ -112,7 +116,11 @@ $Capacidad = @{
 
         foreach ($p in @($Def)) {
             $displayName = $p.displayName
+<<<<<<< Updated upstream
             $state = if ($p.PSObject.Properties['state'] -and $p.state) { $p.state } else { 'disabled' }
+=======
+            $state = if ((Get-LabPropiedadValor -Objeto $p -Nombre 'state') -and $p.state) { $p.state } else { 'disabled' }
+>>>>>>> Stashed changes
 
             # Aviso si la política se crea habilitada
             if ($state -eq 'enabled') {
@@ -141,7 +149,11 @@ $Capacidad = @{
                 conditions  = $p.conditions
                 grantControls = $p.grantControls
             }
+<<<<<<< Updated upstream
             if ($p.PSObject.Properties['sessionControls'] -and $null -ne $p.sessionControls) {
+=======
+            if ((Get-LabPropiedadValor -Objeto $p -Nombre 'sessionControls') -and $null -ne $p.sessionControls) {
+>>>>>>> Stashed changes
                 $body['sessionControls'] = $p.sessionControls
             }
 

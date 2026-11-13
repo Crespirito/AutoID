@@ -53,7 +53,7 @@ $Capacidad = @{
             if ([string]::IsNullOrWhiteSpace($l.skuPartNumber)) {
                 $errores += "Licencia #$i sin 'skuPartNumber'."
             }
-            if ($l.PSObject.Properties['disabledPlans'] -and $null -ne $l.disabledPlans) {
+            if ((Get-LabPropiedadValor -Objeto $l -Nombre 'disabledPlans') -and $null -ne $l.disabledPlans) {
                 foreach ($dp in @($l.disabledPlans)) {
                     if ([string]::IsNullOrWhiteSpace($dp)) {
                         $errores += "Licencia #$i con disabledPlan vacío."
@@ -67,7 +67,7 @@ $Capacidad = @{
     Describir = {
         param($Def)
         $nombres = @($Def) | ForEach-Object { "$($_.usuario) -> $($_.skuPartNumber)" }
-        return "Licencias ($($nombres.Count)): $($nombres -join ', ')"
+        return "Licencias ($(@($nombres).Count)): $($nombres -join ', ')"
     }
 
     Crear = {
@@ -144,7 +144,11 @@ $Capacidad = @{
             # --- 5. Construir AddLicenses ---
             $addLicense = @{ SkuId = $skuId }
 
+<<<<<<< Updated upstream
             if ($l.PSObject.Properties['disabledPlans'] -and $null -ne $l.disabledPlans) {
+=======
+            if ((Get-LabPropiedadValor -Objeto $l -Nombre 'disabledPlans') -and $null -ne $l.disabledPlans) {
+>>>>>>> Stashed changes
                 $disabledIds = @()
                 foreach ($dpName in @($l.disabledPlans)) {
                     $plan = $null

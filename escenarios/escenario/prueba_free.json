@@ -1,5 +1,6 @@
 {
   "nombre": "prueba_free",
+<<<<<<< Updated upstream
   "descripcion": "Escenario Free completo.",
   "version": "1.0",
   "usuarios": [
@@ -16,10 +17,36 @@
       "mailNickname": "javier.m",
       "department": "IT",
       "jobTitle": "Administrador de Sistemas"
+=======
+  "descripcion": "Escenario de prueba con datos reales (España)",
+  "version": "1.0",
+  "usuarios": [
+    {
+      "displayName": "Alejandro Gomez",
+      "upn": "alejandro.gomez@{tenant}",
+      "mailNickname": "alejandro.gomez",
+      "department": "IT",
+      "jobTitle": "Administrador de Sistemas"
+    },
+    {
+      "displayName": "Maria Lopez",
+      "upn": "maria.lopez@{tenant}",
+      "mailNickname": "maria.lopez",
+      "department": "Ventas",
+      "jobTitle": "Comercial"
+    },
+    {
+      "displayName": "Javier Ruiz",
+      "upn": "javier.ruiz@{tenant}",
+      "mailNickname": "javier.ruiz",
+      "department": "RRHH",
+      "jobTitle": "Tecnico de RRHH"
+>>>>>>> Stashed changes
     }
   ],
   "grupos": [
     {
+<<<<<<< Updated upstream
       "displayName": "Departamento de Ventas",
       "description": "Usuarios del departamento de Ventas",
       "mailNickname": "departamento-ventas"
@@ -28,16 +55,46 @@
       "displayName": "Departamento de IT",
       "description": "Usuarios del departamento de IT",
       "mailNickname": "departamento-it"
+=======
+      "displayName": "Departamento de IT",
+      "description": "Usuarios del departamento de Informatica",
+      "mailNickname": "departamento-it"
+    },
+    {
+      "displayName": "Departamento de Ventas",
+      "description": "Usuarios del departamento de Ventas",
+      "mailNickname": "departamento-ventas"
+    }
+  ],
+  "aplicaciones": [
+    {
+      "displayName": "Portal de Empleados",
+      "description": "Aplicacion interna para los empleados",
+      "signInAudience": "AzureADMyOrg",
+      "redirectUris": [
+        "https://empleados.empresa.local/callback"
+      ]
+>>>>>>> Stashed changes
     }
   ],
   "relaciones": [
     {
       "tipo": "membresia",
+<<<<<<< Updated upstream
       "usuario": "lucia.g@{tenant}",
+=======
+      "usuario": "alejandro.gomez@{tenant}",
+      "grupo": "Departamento de IT"
+    },
+    {
+      "tipo": "membresia",
+      "usuario": "maria.lopez@{tenant}",
+>>>>>>> Stashed changes
       "grupo": "Departamento de Ventas"
     },
     {
       "tipo": "membresia",
+<<<<<<< Updated upstream
       "usuario": "javier.m@{tenant}",
       "grupo": "Departamento de IT"
     }
@@ -82,6 +139,10 @@
     {
       "email": "invitado.prueba@contoso.com",
       "displayName": "Invitado Prueba"
+=======
+      "usuario": "javier.ruiz@{tenant}",
+      "grupo": "Departamento de Ventas"
+>>>>>>> Stashed changes
     }
   ]
 }

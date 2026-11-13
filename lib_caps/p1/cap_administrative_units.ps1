@@ -54,14 +54,14 @@ $Capacidad = @{
             if ([string]::IsNullOrWhiteSpace($au.displayName)) {
                 $errores += "AU #$i sin 'displayName'."
             }
-            if ($au.PSObject.Properties['members'] -and $null -ne $au.members) {
+            if ((Get-LabPropiedadValor -Objeto $au -Nombre 'members') -and $null -ne $au.members) {
                 foreach ($m in @($au.members)) {
                     if ([string]::IsNullOrWhiteSpace($m)) {
                         $errores += "AU #$i con miembro vacío."
                     }
                 }
             }
-            if ($au.PSObject.Properties['roles'] -and $null -ne $au.roles) {
+            if ((Get-LabPropiedadValor -Objeto $au -Nombre 'roles') -and $null -ne $au.roles) {
                 foreach ($r in @($au.roles)) {
                     if ([string]::IsNullOrWhiteSpace($r.rol)) {
                         $errores += "AU #$i con rol sin 'rol'."
@@ -77,14 +77,16 @@ $Capacidad = @{
 
     Describir = {
         param($Def)
-        $nombres = @($Def) | ForEach-Object {
+        # @(...) obligatorio: bajo StrictMode un solo elemento no es array y
+        # .Count/.Count no existen en ese objeto.
+        $nombres = @(@($Def) | ForEach-Object {
             $extra = @()
-            if ($_.PSObject.Properties['members'] -and $null -ne $_.members) { $extra += "miembros: $(@($_.members).Count)" }
-            if ($_.PSObject.Properties['roles'] -and $null -ne $_.roles) { $extra += "roles: $(@($_.roles).Count)" }
-            $sufijo = if ($extra.Count) { " ($($extra -join ', '))" } else { '' }
+            if ((Get-LabPropiedadValor -Objeto $_ -Nombre 'members') -and $null -ne $_.members) { $extra += "miembros: $(@($_.members).Count)" }
+            if ((Get-LabPropiedadValor -Objeto $_ -Nombre 'roles') -and $null -ne $_.roles) { $extra += "roles: $(@($_.roles).Count)" }
+            $sufijo = if (@($extra).Count -gt 0) { ' (' + (@($extra) -join ', ') + ')' } else { '' }
             "$($_.displayName)$sufijo"
-        }
-        return "Unidades administrativas ($($nombres.Count)): $($nombres -join ', ')"
+        })
+        return "Unidades administrativas ($(@($nombres).Count)): $($nombres -join ', ')"
     }
 
     Crear = {
@@ -94,7 +96,11 @@ $Capacidad = @{
 
         foreach ($auDef in @($Def)) {
             $displayName = $auDef.displayName
+<<<<<<< Updated upstream
             $description = if ($auDef.PSObject.Properties['description']) { $auDef.description } else { '' }
+=======
+            $description = if ((Get-LabPropiedadValor -Objeto $auDef -Nombre 'description')) { $auDef.description } else { '' }
+>>>>>>> Stashed changes
 
             # --- 1. Snapshot pre-lab ---
             if ($Contexto.SnapshotPreLab -and
@@ -137,7 +143,7 @@ $Capacidad = @{
             }
 
             # --- 3. Añadir miembros ---
-            if ($auDef.PSObject.Properties['members'] -and $null -ne $auDef.members) {
+            if ((Get-LabPropiedadValor -Objeto $auDef -Nombre 'members') -and $null -ne $auDef.members) {
                 foreach ($m in @($auDef.members)) {
                     $miembroId = $null
                     $miembroTipo = $null
@@ -190,7 +196,7 @@ $Capacidad = @{
             }
 
             # --- 4. Asignar roles con ámbito de AU ---
-            if ($auDef.PSObject.Properties['roles'] -and $null -ne $auDef.roles) {
+            if ((Get-LabPropiedadValor -Objeto $auDef -Nombre 'roles') -and $null -ne $auDef.roles) {
                 foreach ($r in @($auDef.roles)) {
                     $rolNombre = $r.rol
                     $upn = $r.usuario -replace '\{tenant\}', $Contexto.TenantDomain

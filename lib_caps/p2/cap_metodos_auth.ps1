@@ -24,7 +24,12 @@
 
     DEPENDENCIAS: Usuarios.
 
+<<<<<<< Updated upstream
     NIVEL: P1.
+=======
+    NIVEL: P2 (vive en lib_caps/p2 porque los metodos de autenticacion
+    por politica (TAP) requieren Entra ID P2).
+>>>>>>> Stashed changes
 #>
 
 $Capacidad = @{
@@ -32,7 +37,11 @@ $Capacidad = @{
     Descripcion  = 'Métodos de autenticación (TAP)'
     SeccionJson  = 'metodosAuth'
     Alias        = @('metodosAuth','metodos_auth','authenticationMethods')
+<<<<<<< Updated upstream
     Nivel        = 'P1'
+=======
+    Nivel        = 'P2'
+>>>>>>> Stashed changes
     DependeDe    = @('Usuarios')
     PermisosApp  = @('UserAuthenticationMethod.ReadWrite.All','User.Read.All')
 
@@ -76,7 +85,7 @@ $Capacidad = @{
             if ([string]::IsNullOrWhiteSpace($m.usuario)) {
                 $errores += "Método de autenticación #$i sin 'usuario'."
             }
-            if ($m.PSObject.Properties['lifetimeInMinutes'] -and $null -ne $m.lifetimeInMinutes) {
+            if ((Get-LabPropiedadValor -Objeto $m -Nombre 'lifetimeInMinutes') -and $null -ne $m.lifetimeInMinutes) {
                 $lt = [int]$m.lifetimeInMinutes
                 if ($lt -lt 10 -or $lt -gt 43200) {
                     $errores += "Método #`${i}: 'lifetimeInMinutes' debe estar entre 10 y 43200."
@@ -89,7 +98,7 @@ $Capacidad = @{
     Describir = {
         param($Def)
         $nombres = @($Def) | ForEach-Object { $_.usuario }
-        return "Métodos de autenticación TAP ($($nombres.Count)): $($nombres -join ', ')"
+        return "Métodos de autenticación TAP ($(@($nombres).Count)): $($nombres -join ', ')"
     }
 
     Crear = {
@@ -99,17 +108,29 @@ $Capacidad = @{
 
         foreach ($m in @($Def)) {
             $upn = $m.usuario -replace '\{tenant\}', $Contexto.TenantDomain
+<<<<<<< Updated upstream
             $lifetime = if ($m.PSObject.Properties['lifetimeInMinutes'] -and $null -ne $m.lifetimeInMinutes) {
+=======
+            $lifetime = if ((Get-LabPropiedadValor -Objeto $m -Nombre 'lifetimeInMinutes') -and $null -ne $m.lifetimeInMinutes) {
+>>>>>>> Stashed changes
                 [int]$m.lifetimeInMinutes
             } else {
                 60
             }
+<<<<<<< Updated upstream
             $isUsableOnce = if ($m.PSObject.Properties['isUsableOnce'] -and $null -ne $m.isUsableOnce) {
+=======
+            $isUsableOnce = if ((Get-LabPropiedadValor -Objeto $m -Nombre 'isUsableOnce') -and $null -ne $m.isUsableOnce) {
+>>>>>>> Stashed changes
                 [bool]$m.isUsableOnce
             } else {
                 $true
             }
+<<<<<<< Updated upstream
             $startDateTime = if ($m.PSObject.Properties['startDateTime'] -and $m.startDateTime) {
+=======
+            $startDateTime = if ((Get-LabPropiedadValor -Objeto $m -Nombre 'startDateTime') -and $m.startDateTime) {
+>>>>>>> Stashed changes
                 $m.startDateTime
             } else {
                 (Get-Date).ToString('o')

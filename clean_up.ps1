@@ -42,7 +42,11 @@
 .NOTES
     Depende de lib_ui.ps1, lib_graph.ps1, lib_config.ps1,
     lib_manifiesto.ps1, lib_escenarios.ps1, lib_niveles.ps1,
+<<<<<<< Updated upstream
     lib_caps.ps1, lib_creadores.ps1.
+=======
+    lib_caps.ps1, lib_creadores.ps1, lib_helpers.ps1.
+>>>>>>> Stashed changes
 #>
 #Requires -Version 5.1
 
@@ -69,6 +73,10 @@ $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'lib_niveles.ps1')
 . (Join-Path $PSScriptRoot 'lib_caps.ps1')
 . (Join-Path $PSScriptRoot 'lib_creadores.ps1')
+<<<<<<< Updated upstream
+=======
+. (Join-Path $PSScriptRoot 'lib_helpers.ps1')
+>>>>>>> Stashed changes
 
 # ============================================================
 # VERIFICACIÓN DE SESIÓN
@@ -82,7 +90,13 @@ if (-not (Test-LabGraphSession)) {
 # CONFIGURACIÓN Y CAPACIDADES
 # ============================================================
 $config = Get-LabConfig
+<<<<<<< Updated upstream
 if ((Get-LabCapacidades).Count -eq 0) {
+=======
+# @() obligatorio: Get-LabCapacidades devuelve $null si no hay capacidades
+# registradas, y $null.Count lanza bajo StrictMode.
+if (@(Get-LabCapacidades).Count -eq 0) {
+>>>>>>> Stashed changes
     $null = Initialize-LabCapacidades -Root (Join-Path $PSScriptRoot 'lib_caps')
 }
 
@@ -128,17 +142,30 @@ Write-Host "  Fecha             : $($manifiesto.fecha)"
 Write-Host "  Tenant            : $($manifiesto.tenantDomain)"
 Write-Host "  Nivel             : $($manifiesto.nivel)"
 Write-Host "  Escenario         : $($manifiesto.escenario)"
+<<<<<<< Updated upstream
 Write-Host "  Objetos totales   : $($manifiesto.objetos.Count)"
 Write-Host "  Vulnerabilidades  : $($manifiesto.vulnerabilidades.Count)"
 Write-Host ''
 Write-Host "  Objetos pendientes        : $($pendientes.objetos.Count)" -ForegroundColor Yellow
 Write-Host "  Vulnerabilidades pendientes: $($pendientes.vulnerabilidades.Count)" -ForegroundColor Yellow
+=======
+Write-Host "  Objetos totales   : $(@($manifiesto.objetos).Count)"
+Write-Host "  Vulnerabilidades  : $(@($manifiesto.vulnerabilidades).Count)"
+Write-Host ''
+Write-Host "  Objetos pendientes        : $(@($pendientes.objetos).Count)" -ForegroundColor Yellow
+Write-Host "  Vulnerabilidades pendientes: $(@($pendientes.vulnerabilidades).Count)" -ForegroundColor Yellow
+>>>>>>> Stashed changes
 Write-Host ''
 
 # Desglose por capacidad (objetos)
 $objetosPorCapacidad = @{}
+<<<<<<< Updated upstream
 foreach ($o in $pendientes.objetos) {
     $cap = if ($o.capacidad) { $o.capacidad } else { 'Desconocida' }
+=======
+foreach ($o in @($pendientes.objetos)) {
+    $cap = if ((Get-LabPropiedadValor -Objeto $o -Nombre 'capacidad')) { $o.capacidad } else { 'Desconocida' }
+>>>>>>> Stashed changes
     if (-not $objetosPorCapacidad.ContainsKey($cap)) { $objetosPorCapacidad[$cap] = 0 }
     $objetosPorCapacidad[$cap]++
 }
@@ -152,8 +179,13 @@ if ($objetosPorCapacidad.Count -gt 0) {
 
 # Desglose por capacidad (vulnerabilidades)
 $vulnsPorCapacidad = @{}
+<<<<<<< Updated upstream
 foreach ($v in $pendientes.vulnerabilidades) {
     $cap = if ($v.capacidad) { $v.capacidad } else { 'Desconocida' }
+=======
+foreach ($v in @($pendientes.vulnerabilidades)) {
+    $cap = if ((Get-LabPropiedadValor -Objeto $v -Nombre 'capacidad')) { $v.capacidad } else { 'Desconocida' }
+>>>>>>> Stashed changes
     if (-not $vulnsPorCapacidad.ContainsKey($cap)) { $vulnsPorCapacidad[$cap] = 0 }
     $vulnsPorCapacidad[$cap]++
 }
@@ -165,7 +197,11 @@ if ($vulnsPorCapacidad.Count -gt 0) {
     Write-Host ''
 }
 
+<<<<<<< Updated upstream
 if ($pendientes.objetos.Count -eq 0 -and $pendientes.vulnerabilidades.Count -eq 0) {
+=======
+if (@($pendientes.objetos).Count -eq 0 -and @($pendientes.vulnerabilidades).Count -eq 0) {
+>>>>>>> Stashed changes
     Write-LabOk 'No hay objetos ni vulnerabilidades pendientes de revertir en el manifiesto.'
     exit 0
 }

@@ -44,6 +44,7 @@
 # UTILIDADES INTERNAS
 # ============================================================
 
+<<<<<<< Updated upstream
 function Get-LabContextoBase {
     <#
     .SYNOPSIS
@@ -73,10 +74,86 @@ function Get-LabContextoBase {
         [object]$Log = $null
     )
 
+=======
+function Get-LabPropiedadValor {
+    <#
+    .SYNOPSIS
+        Lee una propiedad de un objeto o de una Hashtable sin lanzar error.
+    .DESCRIPTION
+        Bajo StrictMode, (Get-LabPropiedadValor -Objeto $hashtable -Nombre 'clave') devuelve $null
+        aunque la clave exista: la colección de propiedades del adaptador no
+        indexa las claves del diccionario. Esto rompía todas las comprobaciones
+        defensivas con datos en caliente (funcionaban solo tras pasar el
+        manifiesto por JSON, que los convertía en PSCustomObject).
+        Devuelve $null si la propiedad o clave no existe.
+    .PARAMETER Objeto
+        PSCustomObject, Hashtable, OrderedDictionary o similar.
+    .PARAMETER Nombre
+        Nombre de la propiedad o clave.
+    #>
+    param(
+        [Parameter(Mandatory = $false)]
+        $Objeto,
+
+        [Parameter(Mandatory = $true)]
+        [string]$Nombre
+    )
+
+    if ($null -eq $Objeto) { return $null }
+
+    if ($Objeto -is [System.Collections.IDictionary]) {
+        if ($Objeto.Contains($Nombre)) { return $Objeto[$Nombre] }
+        return $null
+    }
+
+    $prop = $Objeto.PSObject.Properties[$Nombre]
+    if ($prop) { return $prop.Value }
+    return $null
+}
+
+function Get-LabContextoBase {
+    <#
+    .SYNOPSIS
+        Construye el contexto compartido que se pasa a las capacidades.
+    .PARAMETER Manifiesto
+        Manifiesto en construcción (referencia, se muta fuera).
+    .PARAMETER Config
+        Configuración actual (incluye Passwords para la creación).
+    .PARAMETER SnapshotPreLab
+        Hashtable con identificadores preexistentes (opcional).
+    .PARAMETER Log
+        Lista de log compartida.
+    .OUTPUTS
+        Hashtable con el contexto.
+    #>
+    param(
+        [Parameter(Mandatory = $true)]
+        [object]$Manifiesto,
+
+        [Parameter(Mandatory = $true)]
+        [hashtable]$Config,
+
+        [Parameter(Mandatory = $false)]
+        [hashtable]$SnapshotPreLab = $null,
+
+        [Parameter(Mandatory = $false)]
+        [object]$Log = $null
+    )
+
+>>>>>>> Stashed changes
     $ctx = Get-MgContext -ErrorAction SilentlyContinue
     $nivel = Get-LabNivelActual -Config $Config
     $nivelEfectivo = Get-LabNivelEfectivo -Config $Config
 
+<<<<<<< Updated upstream
+=======
+    # Rescatar las contraseñas si venían en el Config (inyectadas por creauto.ps1)
+    $passwords = @{}
+    if ($Config.ContainsKey('Passwords') -and $null -ne $Config['Passwords']) {
+        $passwords = $Config['Passwords']
+    }
+
+>>>>>>> Stashed changes
     return @{
         TenantId       = if ($ctx) { $ctx.TenantId } else { $null }
         TenantDomain   = $Manifiesto.tenantDomain
@@ -86,6 +163,10 @@ function Get-LabContextoBase {
         ObjetosCreados = @{}
         Config         = $Config
         SnapshotPreLab = if ($SnapshotPreLab) { $SnapshotPreLab } else { @{} }
+<<<<<<< Updated upstream
+=======
+        PasswordsPorUpn = $passwords         # <-- Inyección para cap_usuarios.ps1
+>>>>>>> Stashed changes
         Log            = $Log
     }
 }
@@ -187,6 +268,7 @@ function Add-LabObjetoAlManifiesto {
     $id = 'obj-{0:D4}' -f ($Manifiesto.objetos.Count + 1)
     $ctx = Get-MgContext -ErrorAction SilentlyContinue
 
+<<<<<<< Updated upstream
     $tipo = if ($ObjetoCreado.PSObject.Properties['tipo']) { $ObjetoCreado.tipo } else { 'Desconocido' }
 
     # Estado: prioridad a estadoDetalle del objeto creado
@@ -198,8 +280,26 @@ function Add-LabObjetoAlManifiesto {
 
     # Extraer datos: todo excepto 'tipo' y 'estadoDetalle'
     $datos = @{}
+=======
+    $tipo = if ((Get-LabPropiedadValor -Objeto $ObjetoCreado -Nombre 'tipo')) { $ObjetoCreado.tipo } else { 'Desconocido' }
+
+    # Estado: prioridad a estadoDetalle del objeto creado
+    $estadoFinal = $Estado
+    $estadoDetalle = (Get-LabPropiedadValor -Objeto $ObjetoCreado -Nombre 'estadoDetalle')
+    if (-not [string]::IsNullOrWhiteSpace($estadoDetalle)) {
+        $estadoFinal = $ObjetoCreado.estadoDetalle
+    }
+
+    # Extraer datos: todo excepto 'tipo' y 'estadoDetalle'.
+    # Se guarda como PSCustomObject, NO como Hashtable: bajo StrictMode
+    # `(Get-LabPropiedadValor -Objeto $hashtable -Nombre 'x')` devuelve $null incluso cuando la
+    # clave existe, así que todas las comprobaciones defensivas
+    # ((Get-LabPropiedadValor -Objeto $Objeto.datos -Nombre 'objectId') ...) fallaban en caliente
+    # y solo funcionaban tras serializar/deserializar el manifiesto a JSON.
+    $datos = [ordered]@{}
+>>>>>>> Stashed changes
     foreach ($p in $ObjetoCreado.PSObject.Properties) {
-        if ($p.Name -notin @('tipo','estadoDetalle')) {
+        if ($p.Name -notin @('tipo', 'estadoDetalle')) {
             $datos[$p.Name] = $p.Value
         }
     }
@@ -211,7 +311,11 @@ function Add-LabObjetoAlManifiesto {
         estado    = $estadoFinal
         timestamp = (Get-Date).ToString('o')
         tenantId  = if ($ctx) { $ctx.TenantId } else { $null }
+<<<<<<< Updated upstream
         datos     = $datos
+=======
+        datos     = [pscustomobject]$datos
+>>>>>>> Stashed changes
     }
 
     $Manifiesto.objetos += $envuelto
@@ -306,7 +410,11 @@ function Invoke-LabCreacion {
     .PARAMETER Manifiesto
         Manifiesto en construcción (se muta).
     .PARAMETER Config
+<<<<<<< Updated upstream
         Configuración actual.
+=======
+        Configuración actual (incluye Passwords inyectadas).
+>>>>>>> Stashed changes
     .PARAMETER SnapshotPreLab
         Snapshot pre-lab ya construido. Si no se pasa, se construye.
     .PARAMETER Log
@@ -419,6 +527,7 @@ function Get-LabOrdenCapacidades {
     $visitados = @{}
     $enProceso = @{}
 
+<<<<<<< Updated upstream
     function Resolve-LabCap {
         param($nombre)
         if ($visitados.ContainsKey($nombre)) { return }
@@ -446,6 +555,57 @@ function Get-LabOrdenCapacidades {
         Resolve-LabCap -nombre $n
     }
     return $script:LabOrdenTemp
+=======
+    foreach ($n in $conDef) {
+        Invoke-LabVisitCap -nombre $n -Permitidos $conDef -Visitados $visitados -EnProceso $enProceso
+    }
+    return $script:LabOrdenTemp
+}
+
+function Invoke-LabVisitCap {
+    <#
+    .SYNOPSIS
+        Recorrido DFS de dependencias para ordenar la creación de capacidades.
+    .DESCRIPTION
+        Antes vivía anidada dentro de Get-LabOrdenCapacidades, lo que impedía
+        reutilizarla y rompía la recursión cuando se llamaba desde otro scope
+        (la función interna no se resolvía como comando de módulo).
+    .PARAMETER Nombre
+        Capacidad a visitar.
+    .PARAMETER Permitidos
+        Capacidades con definición en el escenario; el resto no se recorre.
+    .PARAMETER Visitados
+        Hashtable de ya procesados (se actualiza).
+    .PARAMETER EnProceso
+        Hashtable de la rama actual, para detectar ciclos (se actualiza).
+    #>
+    param(
+        [Parameter(Mandatory = $true)] [string]$Nombre,
+        [Parameter(Mandatory = $true)] [array]$Permitidos,
+        [Parameter(Mandatory = $true)] [hashtable]$Visitados,
+        [Parameter(Mandatory = $true)] [hashtable]$EnProceso
+    )
+
+    if ($Visitados.ContainsKey($Nombre)) { return }
+    if ($EnProceso.ContainsKey($Nombre)) {
+        Write-LabWarn "Ciclo detectado en dependencias de '$Nombre'. Se ignora."
+        return
+    }
+    $EnProceso[$Nombre] = $true
+
+    $cap = Get-LabCapacidad -Nombre $Nombre
+    if ($cap) {
+        foreach ($dep in @($cap.DependeDe)) {
+            if ($Permitidos -contains $dep) {
+                Invoke-LabVisitCap -Nombre $dep -Permitidos $Permitidos -Visitados $Visitados -EnProceso $EnProceso
+            }
+        }
+    }
+
+    $null = $EnProceso.Remove($Nombre)
+    $Visitados[$Nombre] = $true
+    $script:LabOrdenTemp += $Nombre
+>>>>>>> Stashed changes
 }
 
 # ============================================================
@@ -519,7 +679,11 @@ function Invoke-LabReversion {
         }
 
         # Validar datos
+<<<<<<< Updated upstream
         if (-not $v.PSObject.Properties['datos'] -or $null -eq $v.datos) {
+=======
+        if (-not ((Get-LabPropiedadValor -Objeto $v -Nombre 'datos')) -or $null -eq $v.datos) {
+>>>>>>> Stashed changes
             Write-LabWarn "Vulnerabilidad $($v.id) sin 'datos' en el manifiesto. No se puede revertir."
             $v.estado = 'no-revertida'
             $contadores.Omitidos++
@@ -537,7 +701,11 @@ function Invoke-LabReversion {
         # PreRevertir si existe
         if ($cap.ContainsKey('PreRevertir') -and $cap.PreRevertir -is [scriptblock]) {
             try {
+<<<<<<< Updated upstream
                 $null = & $cap.PreRevertir @($v) $ctx
+=======
+                $null = & $cap.PreRevertir $v $ctx
+>>>>>>> Stashed changes
             } catch {
                 Write-LabWarn "PreRevertir de '$($v.capacidad)' falló para $($v.id): $($_.Exception.Message)"
             }
@@ -601,7 +769,11 @@ function Invoke-LabReversion {
         # PreRevertir si existe
         if ($cap.ContainsKey('PreRevertir') -and $cap.PreRevertir -is [scriptblock]) {
             try {
+<<<<<<< Updated upstream
                 $null = & $cap.PreRevertir @($o) $ctx
+=======
+                $null = & $cap.PreRevertir $o $ctx
+>>>>>>> Stashed changes
             } catch {
                 Write-LabWarn "PreRevertir de '$($o.capacidad)' falló para $($o.id): $($_.Exception.Message)"
             }
@@ -641,11 +813,14 @@ function Test-LabObjetoCoincideConManifiesto {
         Para tipos sin verificación específica, se devuelve $true (se
         confía en el manifiesto). Es el comportamiento histórico, pero
         ahora los tipos más comunes tienen verificación.
+<<<<<<< Updated upstream
 
         Si el manifiesto no tiene objectId, no se puede verificar; se
         devuelve $true (idempotente).
         Si el objeto ya no existe, se devuelve $true (idempotente).
         Si el objectId actual difiere del del manifiesto, se devuelve $false.
+=======
+>>>>>>> Stashed changes
     .OUTPUTS
         $true si se puede borrar, $false si no.
     #>
@@ -655,7 +830,11 @@ function Test-LabObjetoCoincideConManifiesto {
     )
 
     $objectIdEsperado = $null
+<<<<<<< Updated upstream
     if ($Objeto.datos -and $Objeto.datos.PSObject.Properties['objectId']) {
+=======
+    if ($Objeto.datos -and ((Get-LabPropiedadValor -Objeto $Objeto.datos -Nombre 'objectId'))) {
+>>>>>>> Stashed changes
         $objectIdEsperado = $Objeto.datos.objectId
     }
     if ([string]::IsNullOrWhiteSpace($objectIdEsperado)) {
@@ -687,23 +866,35 @@ function Test-LabObjetoCoincideConManifiesto {
                 $actual = Get-MgDirectoryAdministrativeUnit -AdministrativeUnitId $objectIdEsperado -ErrorAction SilentlyContinue
             }
             default {
+<<<<<<< Updated upstream
                 # Tipo sin verificación genérica: confiamos en el manifiesto.
+=======
+>>>>>>> Stashed changes
                 return $true
             }
         }
 
         if ($actual -is [array]) { $actual = $actual[0] }
         if ($null -eq $actual) {
+<<<<<<< Updated upstream
             # Ya no existe: idempotente, se puede "revertir" (no-op).
             return $true
         }
         if ($actual.Id -ne $objectIdEsperado) {
             # Existe otro objeto con el mismo nombre pero distinto Id.
+=======
+            return $true
+        }
+        if ($actual.Id -ne $objectIdEsperado) {
+>>>>>>> Stashed changes
             return $false
         }
         return $true
     } catch {
+<<<<<<< Updated upstream
         # Si no se puede verificar, se confía en el manifiesto.
+=======
+>>>>>>> Stashed changes
         return $true
     }
 }
@@ -715,6 +906,7 @@ function Test-LabVulnerabilidadCoincideConManifiesto {
         con el objectId esperado.
     .DESCRIPTION
         Cada tipo de vulnerabilidad guarda en datos el objectId del objeto
+<<<<<<< Updated upstream
         afectado (además de otros identificadores específicos). Esta función
         usa ese objectId para verificar que el objeto no se ha borrado y
         recreado externamente.
@@ -736,6 +928,11 @@ function Test-LabVulnerabilidadCoincideConManifiesto {
             datos.userId
 
         Para tipos no soportados, se devuelve $true.
+=======
+        afectado (objetoAfectadoObjectId) además de otros identificadores
+        específicos. Esta función usa ese objectId para verificar que el
+        objeto no se ha borrado y recreado externamente.
+>>>>>>> Stashed changes
     .PARAMETER Vulnerabilidad
         Entrada de $Manifiesto.vulnerabilidades.
     .OUTPUTS
@@ -749,16 +946,23 @@ function Test-LabVulnerabilidadCoincideConManifiesto {
     $datos = $Vulnerabilidad.datos
     if ($null -eq $datos) { return $true }
 
+<<<<<<< Updated upstream
     # ObjectId del objeto afectado (preferido)
     $objectIdEsperado = $null
     if ($datos.PSObject.Properties['objetoAfectadoObjectId']) {
         $objectIdEsperado = $datos.objetoAfectadoObjectId
     }
+=======
+    # PSObject.Properties no indexa Hashtable bajo StrictMode: se usa el helper,
+    # que soporta diccionario y objeto, tanto en caliente como tras leer el JSON.
+    $objectIdEsperado = ((Get-LabPropiedadValor -Objeto $datos -Nombre 'objetoAfectadoObjectId'))
+>>>>>>> Stashed changes
 
     # Fallback por tipo (manifiestos antiguos o capacidades que no lo guardaron)
     if ([string]::IsNullOrWhiteSpace($objectIdEsperado)) {
         switch ($Vulnerabilidad.tipo) {
             'ServicePrincipalOwner' {
+<<<<<<< Updated upstream
                 if ($datos.PSObject.Properties['servicePrincipalId']) {
                     $objectIdEsperado = $datos.servicePrincipalId
                 }
@@ -777,12 +981,27 @@ function Test-LabVulnerabilidadCoincideConManifiesto {
                 if ($datos.PSObject.Properties['userId']) {
                     $objectIdEsperado = $datos.userId
                 }
+=======
+                $objectIdEsperado = ((Get-LabPropiedadValor -Objeto $datos -Nombre 'servicePrincipalId'))
+            }
+            'GroupOwner' {
+                $objectIdEsperado = ((Get-LabPropiedadValor -Objeto $datos -Nombre 'groupId'))
+            }
+            'ApplicationSecret' {
+                $objectIdEsperado = ((Get-LabPropiedadValor -Objeto $datos -Nombre 'applicationId'))
+            }
+            'PimEligibleRole' {
+                $objectIdEsperado = ((Get-LabPropiedadValor -Objeto $datos -Nombre 'userId'))
+>>>>>>> Stashed changes
             }
         }
     }
 
     if ([string]::IsNullOrWhiteSpace($objectIdEsperado)) {
+<<<<<<< Updated upstream
         # Sin objectId: no podemos verificar; confiamos en el manifiesto.
+=======
+>>>>>>> Stashed changes
         return $true
     }
 
@@ -808,7 +1027,10 @@ function Test-LabVulnerabilidadCoincideConManifiesto {
 
         if ($actual -is [array]) { $actual = $actual[0] }
         if ($null -eq $actual) {
+<<<<<<< Updated upstream
             # El objeto afectado ya no existe: idempotente.
+=======
+>>>>>>> Stashed changes
             return $true
         }
         if ($actual.Id -ne $objectIdEsperado) {

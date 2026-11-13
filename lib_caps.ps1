@@ -18,6 +18,7 @@
       Alias         - nombres alternativos de SeccionJson
       ObtenerClaves - scriptblock que recibe $Def y devuelve los
                       identificadores que la capacidad va a tocar
+<<<<<<< Updated upstream
                       (UPN, displayName, etc.). Se usa para construir
                       el snapshot pre-lab y proteger objetos preexistentes.
       PostCrear     - acción tras crear
@@ -35,6 +36,10 @@
       lib_caps/p1/    -> capacidades P1
       lib_caps/p2/    -> capacidades P2
     Renombrar una carpeta a *.disabled desactiva ese nivel.
+=======
+      PostCrear     - acción tras crear
+      PreRevertir   - acción antes de revertir
+>>>>>>> Stashed changes
 .NOTES
     Depende de lib_ui.ps1 y lib_niveles.ps1.
     Se carga por dot-sourcing desde menu.ps1.
@@ -61,7 +66,10 @@ $script:LabCapacidadCamposObligatorios = @(
     'PreguntarUI'
 )
 
+<<<<<<< Updated upstream
 # Campos opcionales que, si existen, deben ser scriptblock
+=======
+>>>>>>> Stashed changes
 $script:LabCapacidadCamposOpcionalesScriptblock = @(
     'ObtenerClaves',
     'PostCrear',
@@ -125,7 +133,11 @@ function Register-LabCapacidad {
         }
     }
 
+<<<<<<< Updated upstream
     # 3. Scriptblocks opcionales (si están, deben ser scriptblock)
+=======
+    # 3. Scriptblocks opcionales
+>>>>>>> Stashed changes
     foreach ($campo in $script:LabCapacidadCamposOpcionalesScriptblock) {
         if ($Capacidad.ContainsKey($campo) -and $null -ne $Capacidad[$campo]) {
             if ($Capacidad[$campo] -isnot [scriptblock]) {
@@ -141,7 +153,11 @@ function Register-LabCapacidad {
         return $false
     }
 
+<<<<<<< Updated upstream
     # 5. SeccionJson duplicada (si no es $null)
+=======
+    # 5. SeccionJson duplicada
+>>>>>>> Stashed changes
     if (-not [string]::IsNullOrWhiteSpace($Capacidad.SeccionJson)) {
         foreach ($existente in $script:LabCapacidades.Values) {
             if ($existente.SeccionJson -eq $Capacidad.SeccionJson) {
@@ -151,12 +167,20 @@ function Register-LabCapacidad {
         }
     }
 
+<<<<<<< Updated upstream
     # 6. Nivel: si no lo declara, hereda de la carpeta
+=======
+    # 6. Nivel
+>>>>>>> Stashed changes
     if (-not $Capacidad.ContainsKey('Nivel') -or [string]::IsNullOrWhiteSpace($Capacidad.Nivel)) {
         $Capacidad['Nivel'] = $NivelCarpeta
     }
 
+<<<<<<< Updated upstream
     # 7. Dependencias: existen y son de nivel igual o inferior
+=======
+    # 7. Dependencias
+>>>>>>> Stashed changes
     $ordenCap = Get-LabNivelOrden -Nivel $Capacidad.Nivel
     foreach ($dep in @($Capacidad.DependeDe)) {
         if ([string]::IsNullOrWhiteSpace($dep)) { continue }
@@ -166,13 +190,21 @@ function Register-LabCapacidad {
         }
         $ordenDep = Get-LabNivelOrden -Nivel $script:LabCapacidades[$dep].Nivel
         if ($ordenDep -gt $ordenCap) {
+<<<<<<< Updated upstream
             Write-LabWarn "Capacidad '$nombre' rechazada: depende de '$dep' (nivel superior). Las dependencias solo pueden ser de nivel igual o inferior."
+=======
+            Write-LabWarn "Capacidad '$nombre' rechazada: depende de '$dep' (nivel superior)."
+>>>>>>> Stashed changes
             return $false
         }
     }
 
     # 8. Ciclos
+<<<<<<< Updated upstream
     if (Test-LabCicloDependencias -Nombre $nombre -Capacidad $Capacidad -Visitados @()) {
+=======
+    if (Test-LabCicloDependencias -Nombre $nombre -Capacidad $Capacidad) {
+>>>>>>> Stashed changes
         Write-LabWarn "Capacidad '$nombre' rechazada: ciclo en DependeDe."
         return $false
     }
@@ -181,6 +213,33 @@ function Register-LabCapacidad {
     $script:LabCapacidades[$nombre] = $Capacidad
     return $true
 }
+function Test-LabCicloDependencias {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Nombre,
+
+        [Parameter(Mandatory = $true)]
+        [hashtable]$Capacidad,
+
+        [array]$Visitados = @()
+    )
+
+    if ($Visitados -contains $Nombre) { return $true }
+    $Visitados += $Nombre
+
+    foreach ($dep in @($Capacidad.DependeDe)) {
+        if ([string]::IsNullOrWhiteSpace($dep)) { continue }
+        if (-not $script:LabCapacidades.ContainsKey($dep)) { continue }
+        if (Test-LabCicloDependencias -Nombre $dep -Capacidad $script:LabCapacidades[$dep] -Visitados $Visitados) {
+            return $true
+        }
+    }
+    return $false
+}
+
+# ============================================================
+# FUNCIONES PÚBLICAS: CONSULTA
+# ============================================================
 
 function Test-LabCicloDependencias {
     <#
@@ -239,6 +298,7 @@ function Get-LabCapacidades {
 
     if ($Nivel) {
         $resultado = @($resultado | Where-Object { Test-LabNivelPermitido -NivelCapacidad $_.Nivel -NivelConfigurado $Nivel })
+<<<<<<< Updated upstream
     }
 
     if ($SoloDisponibles -and $Contexto) {
@@ -248,14 +308,28 @@ function Get-LabCapacidades {
         })
     }
 
+=======
+    }
+
+    if ($SoloDisponibles -and $Contexto) {
+        $resultado = @($resultado | Where-Object {
+            $t = & $_.TestDisponible $Contexto
+            return ($t.Disponible -eq $true)
+        })
+    }
+
+>>>>>>> Stashed changes
     return @($resultado | Sort-Object { $_.Nombre })
 }
 
 function Get-LabCapacidad {
+<<<<<<< Updated upstream
     <#
     .SYNOPSIS
         Devuelve una capacidad por nombre, o $null si no existe.
     #>
+=======
+>>>>>>> Stashed changes
     param(
         [Parameter(Mandatory = $true)]
         [string]$Nombre
@@ -267,10 +341,13 @@ function Get-LabCapacidad {
 }
 
 function Get-LabCapacidadPorSeccion {
+<<<<<<< Updated upstream
     <#
     .SYNOPSIS
         Devuelve la capacidad que reclama una sección JSON, o $null.
     #>
+=======
+>>>>>>> Stashed changes
     param(
         [Parameter(Mandatory = $true)]
         [string]$Seccion
@@ -358,7 +435,14 @@ function Initialize-LabCapacidades {
         $Root = Join-Path $PSScriptRoot 'lib_caps'
     }
 
+<<<<<<< Updated upstream
     Clear-LabCapacidades
+=======
+    # Clear-LabCapacidades devuelve una Hashtable vacia (@{}); sin esto, ese
+    # valor se sumaba a la salida de la funcion y Initialize devolvia
+    # 'True True ... 0' en vez del numero de capacidades registradas.
+    $null = Clear-LabCapacidades
+>>>>>>> Stashed changes
 
     if (-not (Test-Path -Path $Root -PathType Container)) {
         Write-LabWarn "No existe la carpeta de capacidades: $Root"
@@ -369,6 +453,7 @@ function Initialize-LabCapacidades {
         $Niveles = Get-LabNivelesDisponibles -RootCaps $Root
     }
 
+<<<<<<< Updated upstream
     $total = 0
     foreach ($nivel in $Niveles) {
         $carpeta = Get-LabNivelCarpeta -Nivel $nivel
@@ -392,9 +477,110 @@ function Initialize-LabCapacidades {
                 Write-LabWarn "Error cargando $($archivo.Name): $($_.Exception.Message)"
             } finally {
                 Remove-Variable -Name 'Capacidad' -ErrorAction SilentlyContinue
+=======
+    # PASO 1: recolectar todas las definiciones en un runspace desechable.
+    # Motivo: cada cap_*.ps1 termina con `Register-LabCapacidad -Capacidad $Capacidad`,
+    # y un dot-source normal registraba 15 capacidades dentro de ESTE scope antes de
+    # que empezara la pasada de dependencias. El runspace no comparte estado, así que
+    # aquí solo se obtiene la definición; el registro real ocurre en el PASO 2.
+    $definiciones = [System.Collections.Generic.List[object]]::new()
+    $libs = @(
+        'lib_ui.ps1','lib_graph.ps1','lib_config.ps1','lib_manifiesto.ps1',
+        'lib_escenarios.ps1','lib_niveles.ps1','lib_caps.ps1','lib_creadores.ps1'
+    ) | ForEach-Object { Join-Path $PSScriptRoot $_ } | Where-Object { Test-Path $_ }
+
+    foreach ($nivel in $Niveles) {
+        $carpeta = Get-LabNivelCarpeta -Nivel $nivel
+        $rutaNivel = Join-Path $Root $carpeta
+        if (-not (Test-Path -Path $rutaNivel -PathType Container)) { continue }
+
+        $archivos = @(Get-ChildItem -Path $rutaNivel -Filter 'cap_*.ps1' -File -ErrorAction SilentlyContinue | Sort-Object Name)
+        foreach ($archivo in $archivos) {
+            $ps = $null
+            try {
+                $ps = [powershell]::Create()
+                # En el runspace se dota-source lib_caps.ps1 SIN llamar al loader
+                # (llamarlo allí dispararía otra carga completa: recursión).
+                $null = $ps.AddScript({
+                    param($Ruta, $Libs)
+                    foreach ($lib in $Libs) { . $lib }
+                    . $Ruta
+                    if ($null -eq $Capacidad) { return }
+                    # Solo el Hashtable; el bool del Register final se descarta.
+                    return ,$Capacidad
+                }).AddArgument($archivo.FullName).AddArgument([object[]]$libs)
+
+                $res = @($ps.Invoke())
+                $def = $res | Where-Object { $_ -is [hashtable] } | Select-Object -First 1
+
+                if ($null -eq $def) {
+                    Write-LabWarn "El archivo $($archivo.Name) no define `$Capacidad."
+                    continue
+                }
+
+                # Los scriptblocks de la capacidad conservan el SessionState del
+                # runspace desechable. Al invocarlos después desde el scope real
+                # fallaban con NullReferenceException (p. ej. Describir al abrirse
+                # ese runspace y liberarse). Se recompilan en el scope actual a
+                # partir del AST, que no arrastra estado.
+                foreach ($clave in @($def.Keys)) {
+                    if ($def[$clave] -is [scriptblock]) {
+                        $def[$clave] = $def[$clave].Ast.GetScriptBlock()
+                    }
+                }
+
+                $definiciones.Add([pscustomobject]@{ Nivel = $nivel; Capacidad = $def })
+            } catch {
+                Write-LabWarn "Error cargando $($archivo.Name): $($_.Exception.Message)"
+            } finally {
+                if ($null -ne $ps) { $ps.Dispose() }
+>>>>>>> Stashed changes
             }
         }
     }
 
+<<<<<<< Updated upstream
     return $total
 }
+=======
+    # PASO 2: registrar respetando dependencias (varias pasadas).
+    $total = 0
+    $pendientes = @($definiciones)
+    $sinProgreso = 0
+
+    while ($pendientes.Count -gt 0) {
+        $antes = $total
+        $siguientes = [System.Collections.Generic.List[object]]::new()
+
+        foreach ($item in $pendientes) {
+            $cap = $item.Capacidad
+            $listo = $true
+            foreach ($dep in @($cap.DependeDe)) {
+                if ([string]::IsNullOrWhiteSpace($dep)) { continue }
+                if (-not $script:LabCapacidades.ContainsKey($dep)) { $listo = $false; break }
+            }
+            if ($listo) {
+                $registrada = Register-LabCapacidad -Capacidad $cap -NivelCarpeta $item.Nivel
+                if ($registrada -eq $true) { $total = $total + 1 }
+            } else {
+                $siguientes.Add($item)
+            }
+        }
+
+        $pendientes = $siguientes.ToArray()
+        if ($total -eq $antes) {
+            $sinProgreso++
+            if ($sinProgreso -ge 2) {
+                foreach ($item in $pendientes) {
+                    Write-LabWarn "Capacidad '$($item.Capacidad.Nombre)' no registrada: dependencias sin resolver ($(@($item.Capacidad.DependeDe) -join ', '))."
+                }
+                break
+            }
+        } else {
+            $sinProgreso = 0
+        }
+    }
+
+    return [int]$total
+}
+>>>>>>> Stashed changes

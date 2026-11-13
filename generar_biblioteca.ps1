@@ -44,7 +44,11 @@
 .PARAMETER OutDir
     Carpeta raiz de salida. Por defecto, escenarios/ junto al script.
 .NOTES
+<<<<<<< Updated upstream
     Autocontenido. No depende de lib_*.ps1.
+=======
+    Depende de lib_ui.ps1 y lib_helpers.ps1 (solo semillas y salida).
+>>>>>>> Stashed changes
 #>
 [CmdletBinding()]
 param(
@@ -60,6 +64,13 @@ $ErrorActionPreference = 'Stop'
 # ============================================================
 # HELPERS LOCALES (no dependen de lib_ui.ps1)
 # ============================================================
+<<<<<<< Updated upstream
+=======
+# Helpers compartidos de semilla (Get-LabSecretsDir / Get-LabSeed).
+. (Join-Path $PSScriptRoot 'lib_ui.ps1')
+. (Join-Path $PSScriptRoot 'lib_helpers.ps1')
+
+>>>>>>> Stashed changes
 function Write-InfoLocal { param([string]$Msg) Write-Host "[INFO]  $Msg" -ForegroundColor Gray }
 function Write-OkLocal   { param([string]$Msg) Write-Host "[OK]    $Msg" -ForegroundColor Green }
 function Write-WarnLocal { param([string]$Msg) Write-Host "[WARN]  $Msg" -ForegroundColor Yellow }
@@ -105,15 +116,25 @@ Write-InfoLocal "Nivel de generacion: $Nivel"
 # ============================================================
 # SEMILLAS LOCALES
 # ============================================================
+<<<<<<< Updated upstream
 function Get-LabSecretsDir {
     param([string]$Root)
     return (Join-Path $Root '.secrets')
 }
 
+=======
+# Get-LabSecretsDir / Get-LabSeed: lib_helpers.ps1
+>>>>>>> Stashed changes
 function New-LabSeedIfMissing {
     <#
     .SYNOPSIS
         Crea la semilla local de un escenario si no existe. No sobrescribe.
+<<<<<<< Updated upstream
+=======
+    .NOTES
+        Envoltorio de Get-LabSeed (lib_helpers.ps1): este generador solo
+        necesita la ruta del archivo .seed, no los bytes.
+>>>>>>> Stashed changes
     #>
     param(
         [Parameter(Mandatory = $true)] [string]$Root,
@@ -131,6 +152,7 @@ function New-LabSeedIfMissing {
         return $seedPath
     }
 
+<<<<<<< Updated upstream
     $bytes = New-Object byte[] 32
     $rng = [System.Security.Cryptography.RandomNumberGenerator]::Create()
     try { $rng.GetBytes($bytes) } finally { $rng.Dispose() }
@@ -153,6 +175,10 @@ function New-LabSeedIfMissing {
         Write-WarnLocal "No se pudieron restringir los permisos de $seedPath : $($_.Exception.Message)"
     }
 
+=======
+    # Get-LabSeed crea el archivo con permisos restringidos.
+    $null = Get-LabSeed -NombreEscenario $NombreEscenario -Root $Root
+>>>>>>> Stashed changes
     Write-InfoLocal "Semilla generada para '$NombreEscenario'."
     return $seedPath
 }

@@ -6,6 +6,7 @@
       - ConvertTo-LabEscenarioNormalizado: convierte un JSON (o un objeto
         ya deserializado) en un objeto con todas las secciones posibles,
         agrupadas por Nombre de capacidad.
+<<<<<<< Updated upstream
       - ConvertFrom-LabEscenarioNormalizado: hace el camino inverso,
         generando un objeto serializable a JSON.
       - Listado y carga de escenarios, vulnerabilidades y plantillas.
@@ -131,6 +132,72 @@ function Get-LabPlantillasDisponibles {
 # NORMALIZACIÓN
 # ============================================================
 
+=======
+      - ConvertFrom-LabEscenarioNormalizado: hace el camino inverso.
+      - Listado y carga de escenarios, vulnerabilidades y plantillas.
+#>
+
+# ============================================================
+# RUTAS CANÓNICAS
+# ============================================================
+$script:LabEscenariosRoot       = Join-Path $PSScriptRoot 'escenarios'
+$script:LabEscenariosPath       = Join-Path $script:LabEscenariosRoot 'escenario'
+$script:LabVulnerabilidadesPath = Join-Path $script:LabEscenariosRoot 'vulnerab'
+$script:LabPlantillasPath       = Join-Path $script:LabEscenariosRoot 'plantillas'
+$script:LabSecretsPath          = Join-Path $script:LabEscenariosRoot '.secrets'
+
+# ============================================================
+# RUTAS
+# ============================================================
+function Get-LabEscenariosPath { return $script:LabEscenariosPath }
+function Get-LabVulnerabilidadesPath { return $script:LabVulnerabilidadesPath }
+function Get-LabPlantillasPath { return $script:LabPlantillasPath }
+function Get-LabSecretsPath { return $script:LabSecretsPath }
+
+# ============================================================
+# LISTADO
+# ============================================================
+function Get-LabEscenariosDisponibles {
+    if (-not (Test-Path -Path $script:LabEscenariosPath)) { return @() }
+    $files = Get-ChildItem -Path $script:LabEscenariosPath -Filter '*.json' -File -ErrorAction SilentlyContinue
+    return @($files | ForEach-Object { $_.BaseName } | Sort-Object)
+}
+
+function Get-LabVulnerabilidadesDisponibles {
+    if (-not (Test-Path -Path $script:LabVulnerabilidadesPath)) { return @() }
+    $files = Get-ChildItem -Path $script:LabVulnerabilidadesPath -Filter '*.json' -File -ErrorAction SilentlyContinue
+    return @($files | ForEach-Object { $_.BaseName } | Sort-Object)
+}
+
+function Get-LabPlantillasDisponibles {
+    if (-not (Test-Path -Path $script:LabPlantillasPath)) { return @() }
+    $files = Get-ChildItem -Path $script:LabPlantillasPath -Filter '*.json' -File -ErrorAction SilentlyContinue
+    return @($files | ForEach-Object { $_.BaseName } | Sort-Object)
+}
+
+# ============================================================
+# NORMALIZACIÓN
+# ============================================================
+function ConvertTo-LabArraySeccion {
+    <#
+    .SYNOPSIS
+        Devuelve el contenido de una sección del JSON siempre como array.
+    .DESCRIPTION
+        Sustituye a `@($valor)` + `[string]::IsNullOrWhiteSpace([string]$valor)`.
+        Esa conversión a [string] de un array devuelve cadena vacía, así que
+        cualquier sección con datos se trataba como vacía. Aquí solo se
+        considera vacío un $null o una cadena en blanco.
+    #>
+    param(
+        [Parameter(Mandatory = $false)] $Valor
+    )
+
+    if ($null -eq $Valor) { return @() }
+    if ($Valor -is [string] -and [string]::IsNullOrWhiteSpace($Valor)) { return @() }
+    return @($Valor)
+}
+
+>>>>>>> Stashed changes
 function ConvertTo-LabEscenarioNormalizado {
     <#
     .SYNOPSIS
@@ -160,6 +227,7 @@ function ConvertTo-LabEscenarioNormalizado {
 
     $sourcePath = $null
 
+    # Si no nos pasan el objeto, leemos el archivo
     if ($null -eq $Raw) {
         if ([string]::IsNullOrWhiteSpace($Path)) {
             throw 'ConvertTo-LabEscenarioNormalizado: se requiere -Path o -Raw.'
@@ -180,6 +248,7 @@ function ConvertTo-LabEscenarioNormalizado {
     }
 
     $errores = @()
+<<<<<<< Updated upstream
 
     $nombre = $null
     if ($Raw.PSObject.Properties['nombre'])      { $nombre = [string]$Raw.nombre }
@@ -223,14 +292,59 @@ function ConvertTo-LabEscenarioNormalizado {
                 # IMPORTANTE: Forzamos a array incluso si solo hay un elemento o es una propiedad Count
                 $secciones[$nombreCap] = @($valor)
             }
+=======
+    $nombre = $null
+    $descripcion = $null
+    $version = '1.0'
+
+    # Extraer metadatos básicos de forma segura
+    if ((Get-LabPropiedadValor -Objeto $Raw -Nombre 'nombre'))      { $nombre = [string]$Raw.nombre }
+    elseif ((Get-LabPropiedadValor -Objeto $Raw -Nombre 'Nombre'))  { $nombre = [string]$Raw.Nombre }
+    elseif ($sourcePath)                          { $nombre = [System.IO.Path]::GetFileNameWithoutExtension($sourcePath) }
+
+    if ((Get-LabPropiedadValor -Objeto $Raw -Nombre 'descripcion'))     { $descripcion = [string]$Raw.descripcion }
+    elseif ((Get-LabPropiedadValor -Objeto $Raw -Nombre 'Descripcion')) { $descripcion = [string]$Raw.Descripcion }
+    if ((Get-LabPropiedadValor -Objeto $Raw -Nombre 'version'))         { $version = [string]$Raw.version }
+
+    $clavesJson = @($Raw.PSObject.Properties.Name)
+    $secciones = @{}
+    $capacidades = @(Get-LabCapacidades)
+    # $clavesJson se recalcula en cada vuelta: el Where-Object del final del
+    # bucle sustituye el array, y un filtro sobre un array que cambia de
+    # tamaño devuelve $null en PS7, lo que dejaba 'usuarios'/'grupos' como
+    # claves desconocidas y las secciones vacías.
+
+    foreach ($cap in $capacidades) {
+        $nombreCap = $cap.Nombre
+        if ([string]::IsNullOrWhiteSpace($cap.SeccionJson)) { continue }
+
+        $candidatos = @($cap.SeccionJson)
+        if ($cap.ContainsKey('Alias') -and $cap.Alias) {
+            $candidatos += @($cap.Alias)
+        }
+
+        $encontrada = $null
+        foreach ($c in $candidatos) {
+            if ($clavesJson -contains $c) { $encontrada = $c; break }
+        }
+
+        if ($encontrada) {
+            $valor = $Raw.$encontrada
+            $secciones[$nombreCap] = ConvertTo-LabArraySeccion -Valor $valor
+>>>>>>> Stashed changes
             $clavesJson = @($clavesJson | Where-Object { $_ -ne $encontrada })
         } else {
             $secciones[$nombreCap] = @()
         }
     }
 
+<<<<<<< Updated upstream
     # Secciones desconocidas: guardar nombre Y valor original
     $desconocidas = @($clavesJson | Where-Object { $_ -notin @('nombre','Nombre','descripcion','Descripcion','version') })
+=======
+    # Secciones desconocidas
+    $desconocidas = @($clavesJson | Where-Object { $_ -notmatch '^(?i)(nombre|descripcion|version)$' })
+>>>>>>> Stashed changes
     $rawDesconocidas = @{}
     foreach ($d in $desconocidas) {
         $rawDesconocidas[$d] = $Raw.$d
@@ -253,6 +367,7 @@ function ConvertTo-LabEscenarioNormalizado {
 }
 
 function ConvertFrom-LabEscenarioNormalizado {
+<<<<<<< Updated upstream
     <#
     .SYNOPSIS
         Convierte un escenario normalizado en un objeto serializable a JSON.
@@ -266,6 +381,8 @@ function ConvertFrom-LabEscenarioNormalizado {
     .OUTPUTS
         PSCustomObject listo para ConvertTo-Json.
     #>
+=======
+>>>>>>> Stashed changes
     param(
         [Parameter(Mandatory = $true)]
         [object]$EscenarioNormalizado
@@ -288,9 +405,13 @@ function ConvertFrom-LabEscenarioNormalizado {
         $obj[$cap.SeccionJson] = $def
     }
 
+<<<<<<< Updated upstream
     # Reconstruir desconocidas con su valor original
     if ($EscenarioNormalizado.PSObject.Properties['RawDesconocidas'] -and
         $null -ne $EscenarioNormalizado.RawDesconocidas) {
+=======
+    if ((Get-LabPropiedadValor -Objeto $EscenarioNormalizado -Nombre 'RawDesconocidas') -and $null -ne $EscenarioNormalizado.RawDesconocidas) {
+>>>>>>> Stashed changes
         foreach ($d in $EscenarioNormalizado.Desconocidas) {
             if ([string]::IsNullOrWhiteSpace($d)) { continue }
             if ($EscenarioNormalizado.RawDesconocidas.ContainsKey($d)) {
@@ -300,7 +421,10 @@ function ConvertFrom-LabEscenarioNormalizado {
             }
         }
     } else {
+<<<<<<< Updated upstream
         # Fallback: sin RawDesconocidas, se ponen vacías
+=======
+>>>>>>> Stashed changes
         foreach ($d in @($EscenarioNormalizado.Desconocidas)) {
             if ([string]::IsNullOrWhiteSpace($d)) { continue }
             $obj[$d] = @()
@@ -311,6 +435,7 @@ function ConvertFrom-LabEscenarioNormalizado {
 }
 
 function Test-LabEscenarioTieneSecciones {
+<<<<<<< Updated upstream
     <#
     .SYNOPSIS
         Devuelve $true si el escenario normalizado tiene al menos una sección con contenido.
@@ -319,6 +444,8 @@ function Test-LabEscenarioTieneSecciones {
     .OUTPUTS
         $true si hay contenido, $false si todas las secciones están vacías.
     #>
+=======
+>>>>>>> Stashed changes
     param(
         [Parameter(Mandatory = $true)]
         [object]$EscenarioNormalizado
@@ -335,6 +462,7 @@ function Test-LabEscenarioTieneSecciones {
 # ============================================================
 # CARGA DE VULNERABILIDADES (CATÁLOGO)
 # ============================================================
+<<<<<<< Updated upstream
 
 function Get-LabVulnerabilidad {
     <#
@@ -352,6 +480,9 @@ function Get-LabVulnerabilidad {
     .OUTPUTS
         PSCustomObject con Nombre, Descripcion, Tipo, Parametros, RequiereLicencia.
     #>
+=======
+function Get-LabVulnerabilidad {
+>>>>>>> Stashed changes
     param(
         [Parameter(Mandatory = $true)]
         [string]$Nombre
@@ -368,6 +499,7 @@ function Get-LabVulnerabilidad {
         throw "La vulnerabilidad '$Nombre' no es un JSON válido: $($_.Exception.Message)"
     }
 
+<<<<<<< Updated upstream
     if (-not $raw.PSObject.Properties['tipo']) {
         throw "La vulnerabilidad '$Nombre' no declara 'tipo'."
     }
@@ -383,21 +515,41 @@ function Get-LabVulnerabilidad {
             foreach ($p in $raw.parametros.PSObject.Properties) {
                 $parametros[$p.Name] = $p.Value
             }
+=======
+    if (-not ((Get-LabPropiedadValor -Objeto $raw -Nombre 'tipo'))) {
+        throw "La vulnerabilidad '$Nombre' no declara 'tipo'."
+    }
+
+    $parametros = @{}
+    if ((Get-LabPropiedadValor -Objeto $raw -Nombre 'parametros') -and $null -ne $raw.parametros) {
+        if ($raw.parametros -is [hashtable]) {
+            foreach ($k in $raw.parametros.Keys) { $parametros[$k] = $raw.parametros[$k] }
+        } else {
+            foreach ($p in $raw.parametros.PSObject.Properties) { $parametros[$p.Name] = $p.Value }
+>>>>>>> Stashed changes
         }
     }
 
     return [pscustomobject]@{
         Nombre           = $Nombre
+<<<<<<< Updated upstream
         Descripcion      = if ($raw.PSObject.Properties['descripcion']) { $raw.descripcion } else { $null }
         Tipo             = $raw.tipo
         Parametros       = $parametros
         RequiereLicencia = if ($raw.PSObject.Properties['requiereLicencia']) { $raw.requiereLicencia } else { $null }
+=======
+        Descripcion      = if ((Get-LabPropiedadValor -Objeto $raw -Nombre 'descripcion')) { $raw.descripcion } else { $null }
+        Tipo             = $raw.tipo
+        Parametros       = $parametros
+        RequiereLicencia = if ((Get-LabPropiedadValor -Objeto $raw -Nombre 'requiereLicencia')) { $raw.requiereLicencia } else { $null }
+>>>>>>> Stashed changes
     }
 }
 
 # ============================================================
 # PLANTILLAS
 # ============================================================
+<<<<<<< Updated upstream
 
 function Get-LabPlantilla {
     <#
@@ -413,6 +565,10 @@ function Get-LabPlantilla {
         [string]$Nombre
     )
 
+=======
+function Get-LabPlantilla {
+    param([Parameter(Mandatory = $true)][string]$Nombre)
+>>>>>>> Stashed changes
     $path = Join-Path $script:LabPlantillasPath "$Nombre.json"
     if (-not (Test-Path -Path $path)) {
         throw "No existe la plantilla '$Nombre' en $($script:LabPlantillasPath)."
@@ -421,6 +577,7 @@ function Get-LabPlantilla {
 }
 
 function Save-LabPlantilla {
+<<<<<<< Updated upstream
     <#
     .SYNOPSIS
         Guarda un escenario normalizado como plantilla.
@@ -439,6 +596,12 @@ function Save-LabPlantilla {
         [string]$Nombre
     )
 
+=======
+    param(
+        [Parameter(Mandatory = $true)][object]$EscenarioNormalizado,
+        [Parameter(Mandatory = $true)][string]$Nombre
+    )
+>>>>>>> Stashed changes
     try {
         if (-not (Test-Path -Path $script:LabPlantillasPath)) {
             $null = New-Item -ItemType Directory -Path $script:LabPlantillasPath -Force

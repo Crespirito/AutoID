@@ -19,12 +19,25 @@
     o generarla desde la semilla de la sesión manual. En ningún caso se
     guarda la contraseña en el manifiesto ni en el JSON exportado.
 
+<<<<<<< Updated upstream
+=======
+    DOMINIO DEL TENANT:
+    (Get-MgContext).TenantId devuelve el GUID del tenant, NO el dominio DNS.
+    Usarlo como sufijo de UPN provoca 'The domain portion of the
+    userPrincipalName property is invalid'. Por eso el contexto se construye
+    con Get-LabTenantDomainResuelto (Get-MgDomain -> Get-MgOrganization).
+
+>>>>>>> Stashed changes
     La sesión de Graph la gestiona menu.ps1. Este script NO conecta ni
     desconecta; solo verifica que hay sesión activa.
 .NOTES
     Depende de lib_ui.ps1, lib_graph.ps1, lib_config.ps1,
     lib_manifiesto.ps1, lib_escenarios.ps1, lib_niveles.ps1,
+<<<<<<< Updated upstream
     lib_caps.ps1, lib_creadores.ps1.
+=======
+    lib_caps.ps1, lib_creadores.ps1, lib_helpers.ps1.
+>>>>>>> Stashed changes
 #>
 #Requires -Version 5.1
 
@@ -59,9 +72,11 @@ if (-not (Test-LabGraphSession)) {
 # ============================================================
 $config = Get-LabConfig
 $nivel = Get-LabNivelActual -Config $config
+if ($nivel) { $config['NivelLicencia'] = $nivel }
 $null = Initialize-LabCapacidades -Root (Join-Path $PSScriptRoot 'lib_caps')
 
 # ============================================================
+<<<<<<< Updated upstream
 # SEMILLA DE LA SESIÓN MANUAL
 # ============================================================
 
@@ -146,6 +161,69 @@ function New-LabPasswordFromSeed {
     $core = ($b64 -replace '[^A-Za-z0-9]', '').Substring(0, 16)
     return "$core!Aa1"
 }
+=======
+# DOMINIO DEL TENANT
+# ============================================================
+
+function Get-LabTenantDomainResuelto {
+    <#
+    .SYNOPSIS
+        Resuelve el dominio predeterminado verificado del tenant.
+    .DESCRIPTION
+        (Get-MgContext).TenantId devuelve el GUID del tenant, NO un
+        dominio DNS. Usar ese GUID como sufijo de UPN provoca
+        'The domain portion of the userPrincipalName property is invalid'.
+
+        Esta función obtiene el dominio real:
+          1. Get-MgDomain -> el que tenga IsDefault = $true.
+          2. Fallback: Get-MgOrganization.VerifiedDomains -> IsDefault = $true.
+          3. Fallback final: $null (el llamador decide).
+
+        Solo se aceptan dominios que contengan un punto (no GUIDs).
+    .OUTPUTS
+        String con el dominio (ej. 'grexid.onmicrosoft.com'), o $null.
+    #>
+    $esDominioValido = {
+        param($d)
+        return (-not [string]::IsNullOrWhiteSpace($d)) -and ($d -match '\.')
+    }
+
+    try {
+        $dominios = Get-MgDomain -ErrorAction Stop
+        $defecto = @($dominios) | Where-Object { $_.IsDefault -eq $true } | Select-Object -First 1
+        if ($defecto -and (& $esDominioValido $defecto.Id)) {
+            return [string]$defecto.Id
+        }
+        foreach ($d in @($dominios)) {
+            if (& $esDominioValido $d.Id) { return [string]$d.Id }
+        }
+    } catch {
+        Write-LabWarn "Get-MgDomain falló al resolver el dominio del tenant: $($_.Exception.Message)"
+    }
+
+    try {
+        $org = Get-MgOrganization -ErrorAction Stop
+        $defecto = @($org) | ForEach-Object { @($_.VerifiedDomains) } |
+                   Where-Object { $_.IsDefault -eq $true } | Select-Object -First 1
+        if ($defecto -and (& $esDominioValido $defecto.Name)) {
+            return [string]$defecto.Name
+        }
+        foreach ($d in @($org | ForEach-Object { @($_.VerifiedDomains) })) {
+            if (& $esDominioValido $d.Name) { return [string]$d.Name }
+        }
+    } catch {
+        Write-LabWarn "Get-MgOrganization falló al resolver el dominio del tenant: $($_.Exception.Message)"
+    }
+
+    return $null
+}
+
+# ============================================================
+# SEMILLA DE LA SESIÓN MANUAL
+# ============================================================
+
+# Get-LabSecretsDir / Get-LabSeed / New-LabPasswordFromSeed viven en lib_helpers.ps1
+>>>>>>> Stashed changes
 
 # ============================================================
 # CARGA O CREACIÓN DE ESCENARIO
@@ -324,7 +402,11 @@ $esc = Select-LabEscenarioInicial
 
 # Comprobar si tiene nombre sin que StrictMode se queje
 $tieneNombre = $false
+<<<<<<< Updated upstream
 if ($esc.PSObject.Properties['Nombre'] -and -not [string]::IsNullOrWhiteSpace($esc.Nombre)) {
+=======
+if ((Get-LabPropiedadValor -Objeto $esc -Nombre 'Nombre') -and -not [string]::IsNullOrWhiteSpace($esc.Nombre)) {
+>>>>>>> Stashed changes
     $tieneNombre = $true
 }
 
@@ -339,10 +421,32 @@ Write-LabInfo "Semilla de esta sesión: $nombreSemilla"
 Write-LabInfo 'Conserva esta semilla para reproducir las contraseñas generadas automáticamente.'
 Write-Host ''
 
+<<<<<<< Updated upstream
 # 3. Contexto para PreguntarUI y TestDisponible
 $ctx = @{
     TenantId        = (Get-MgContext).TenantId
     TenantDomain    = (Get-MgContext).TenantId
+=======
+# 3. Resolver dominio del tenant
+#
+# (Get-MgContext).TenantId devuelve el GUID del tenant, NO un dominio DNS.
+# Usarlo como sufijo de UPN provocaba:
+#   [Request_BadRequest] The domain portion of the userPrincipalName
+#   property is invalid. You must use one of the verified domain names...
+# Por eso el contexto se construye con el dominio verificado resuelto.
+$tenantDomain = Get-LabTenantDomainResuelto
+if ([string]::IsNullOrWhiteSpace($tenantDomain)) {
+    Write-LabError 'No se pudo resolver el dominio verificado del tenant.'
+    Write-LabInfo 'Comprueba que la sesión de Graph tiene permiso para leer dominios (Domain.Read.All) u organización (Organization.Read.All).'
+    exit 1
+}
+Write-LabInfo "Dominio del tenant resuelto: $tenantDomain"
+
+# 4. Contexto para PreguntarUI y TestDisponible
+$ctx = @{
+    TenantId        = (Get-MgContext).TenantId
+    TenantDomain    = $tenantDomain
+>>>>>>> Stashed changes
     Nivel           = $nivel
     Manifiesto      = $null
     ObjetosCreados  = @{}
@@ -356,7 +460,7 @@ $ctx = @{
     Semilla         = $semilla
 }
 
-# 4. Bucle de construcción
+# 5. Bucle de construcción
 $salir = $false
 while (-not $salir) {
     Show-LabHeader -Titulo 'CREACION MANUAL - CONSTRUCCION DEL ESCENARIO'
@@ -444,10 +548,32 @@ while (-not $salir) {
     }
 }
 
+<<<<<<< Updated upstream
 # 5. Si se guardó, crear y guardar manifiesto
 if ($null -ne $esc) {
     $manifiesto = New-LabManifiestoVacio -Escenario $esc.Nombre -Nivel $nivel -Semilla $nombreSemilla
     $manifiesto.TenantDomain = (Get-MgContext).TenantId
+=======
+# 6. Si se guardó, crear y guardar manifiesto
+if ($null -ne $esc) {
+    # Garantizar dominio resuelto (por si cambió el tenant o el contexto
+    # original no lo tenía). El escenario normalizado no lleva TenantDomain
+    # por sí mismo; lo inyectamos en el manifiesto.
+    if ([string]::IsNullOrWhiteSpace($tenantDomain)) {
+        $tenantDomain = Get-LabTenantDomainResuelto
+    }
+    if ([string]::IsNullOrWhiteSpace($tenantDomain)) {
+        Write-LabError 'No se pudo resolver el dominio verificado del tenant. Abortando guardado de manifiesto.'
+        exit 1
+    }
+
+    $manifiesto = New-LabManifiestoVacio -Escenario $esc.Nombre -Nivel $nivel -Semilla $nombreSemilla
+    $manifiesto.TenantDomain = $tenantDomain
+
+    # El contexto de creación debe llevar el dominio resuelto. Se refresca
+    # por si acaso (el bucle pudo construirse con un $tenantDomain distinto).
+    $ctx.TenantDomain = $tenantDomain
+>>>>>>> Stashed changes
 
     $resultado = Invoke-LabCreacion -EscenarioNormalizado $esc -Manifiesto $manifiesto -Config $config
 
