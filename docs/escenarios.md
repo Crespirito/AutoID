@@ -18,7 +18,7 @@ docs/vulnerabilidades.md.
 
 
 -------------------------------------------------------------------------------
-# 1. ESTRUCTURA BÁSICA DEL JSON
+# 1. Estructura básica del JSON
 -------------------------------------------------------------------------------
 
 Un escenario es un objeto JSON con metadatos y una o varias secciones:
@@ -50,7 +50,7 @@ en @().
 
 
 -------------------------------------------------------------------------------
-# 2. SECCIONES POR CAPACIDAD
+# 2. Ssecciones por capacidad
 -------------------------------------------------------------------------------
 
 Cada sección corresponde a una capacidad. El nombre de la sección es el
@@ -76,7 +76,7 @@ SeccionJson de la capacidad. Los alias permiten usar nombres alternativos.
     creación. La contraseña NO va en el JSON: se deriva de la semilla.
 
 
-## 2.2. GRUPOS  (seccion: grupos, alias: Grupos)
+## 2.2. Grupos  (seccion: grupos, alias: Grupos)
 
     {
       "displayName": "Departamento de Ventas",
@@ -91,7 +91,7 @@ SeccionJson de la capacidad. Los alias permiten usar nombres alternativos.
         description, mailNickname
 
 
-## 2.3. RELACIONES  (seccion: relaciones, alias: Relaciones)
+## 2.3. Relaciones (seccion: relaciones, alias: Relaciones)
 
     {
       "tipo": "membresia",
@@ -106,7 +106,7 @@ SeccionJson de la capacidad. Los alias permiten usar nombres alternativos.
         tipo, usuario, grupo
 
 
-## 2.4. APLICACIONES  (seccion: aplicaciones, alias: Aplicaciones, apps)
+## 2.4. Aplicaciones  (seccion: aplicaciones, alias: Aplicaciones, apps)
 
     {
       "displayName": "Panel de Analisis Comercial",
@@ -160,7 +160,7 @@ SeccionJson de la capacidad. Los alias permiten usar nombres alternativos.
         User, Application
 
 
-## 2.6. CREDENCIALESAPP  (seccion: credencialesApp, alias: credenciales_app, secrets)
+## 2.6. CredencialesAPPP  (seccion: credencialesApp, alias: credenciales_app, secrets)
 
     {
       "aplicacion": "Panel de Analisis Comercial",
@@ -178,7 +178,7 @@ SeccionJson de la capacidad. Los alias permiten usar nombres alternativos.
     SOLA VEZ al operador.
 
 
-## 2.7. PERMISOSAPI  (seccion: permisosApi, alias: permisos_api, apiPermissions)
+## 2.7. Permisos API  (seccion: permisosApi, alias: permisos_api, apiPermissions)
 
     {
       "aplicacion": "Panel de Analisis Comercial",
@@ -194,7 +194,7 @@ SeccionJson de la capacidad. Los alias permiten usar nombres alternativos.
         tipo (application o delegated; por defecto application)
 
 
-## 2.8. INVITADOS  (seccion: invitados, alias: guests)
+## 2.8. Invitados (seccion: invitados, alias: guests)
 
     {
       "email": "invitado@contoso.com",
@@ -210,7 +210,7 @@ SeccionJson de la capacidad. Los alias permiten usar nombres alternativos.
         redirectUrl, sendMessage
 
 
-## 2.9. ADMINISTRATIVEUNITS  (seccion: administrativeUnits, solo P1+)
+## 2.9. AdministrativeUnits (seccion: administrativeUnits, solo P1+)
 
     {
       "displayName": "AU Ventas",
@@ -228,7 +228,7 @@ SeccionJson de la capacidad. Los alias permiten usar nombres alternativos.
         description, members, roles
 
 
-## 2.10. GRUPOSDINAMICOS  (seccion: gruposDinamicos, solo P1+)
+## 2.10. Gruposdinamicos  (seccion: gruposDinamicos, solo P1+)
 
     {
       "displayName": "Dinamico Guests",
@@ -244,7 +244,7 @@ SeccionJson de la capacidad. Los alias permiten usar nombres alternativos.
         description, processingState (On o Paused; por defecto On)
 
 
-## 2.11. GRUPOSROLEASSIGNABLE  (seccion: gruposRoleAssignable, solo P1+)
+## 2.11. GruposRoleAssignable (seccion: gruposRoleAssignable, solo P1+)
 
     {
       "displayName": "RoleAssignable Ventas",
@@ -255,7 +255,7 @@ SeccionJson de la capacidad. Los alias permiten usar nombres alternativos.
         displayName
 
 
-## 2.12. LICENCIAS  (seccion: licencias, solo P1+)
+## 2.12. Licencias  (seccion: licencias, solo P1+)
 
     {
       "usuario": "lucia.g@{tenant}",
@@ -273,7 +273,7 @@ SeccionJson de la capacidad. Los alias permiten usar nombres alternativos.
     tenant no tiene el SKU, se avisa y se omite.
 
 
-## 2.13. ACCESOCONDICIONAL  (seccion: accesoCondicional, solo P1+)
+## 2.13. Accesocondicional  (seccion: accesoCondicional, solo P1+)
 
     {
       "displayName": "CA MFA para admins",
@@ -299,7 +299,7 @@ SeccionJson de la capacidad. Los alias permiten usar nombres alternativos.
     manualmente tras revisar.
 
 
-## 2.14. METODOSAUTH  (seccion: metodosAuth, solo P1+)
+## 2.14. MetodosAuth  (seccion: metodosAuth, solo P1+)
 
     {
       "usuario": "lucia.g@{tenant}",
@@ -337,7 +337,7 @@ SeccionJson de la capacidad. Los alias permiten usar nombres alternativos.
 
 
 -------------------------------------------------------------------------------
-# 3. ALIAS ACEPTADOS
+# 3. Alias aceptados
 -------------------------------------------------------------------------------
 
 Cada capacidad declara un SeccionJson y, opcionalmente, una lista de Alias. El
@@ -347,24 +347,38 @@ compatibilidad con escenarios escritos en español o en versiones anteriores.
     CAPACIDAD            SECCIÓN JSON         ALIAS
     -------------------  -------------------  --------------------------------
     Usuarios             usuarios             Usuarios
+
     Grupos               grupos               Grupos
+
     Relaciones           relaciones           Relaciones
+
     Aplicaciones         aplicaciones         Aplicaciones, apps
+
     AppRoles             appRoles             app_roles
+
     CredencialesApp      credencialesApp      credenciales_app, secrets
+
     PermisosApi          permisosApi          permisos_api, apiPermissions
+
     Invitados            invitados            guests
+
     AdministrativeUnits  administrativeUnits  unidadesAdministrativas,
                                               unidades_administrativas,
                                               adminUnits
+
     GruposDinamicos      gruposDinamicos      dynamicGroups, dynamic_groups
+
     GruposRoleAssignable gruposRoleAssignable grupos_role_assignable,
                                               gruposAsignablesARoles
+
     Licencias            licencias            licenses
+
     AccesoCondicional    accesoCondicional    acceso_condicional,
                                               conditionalAccess
+
     MetodosAuth          metodosAuth          metodos_auth,
                                               authenticationMethods
+
     Pim                  pim                  PIM, rolesElegibles
 
 **NOTA:** 'Vulnerabilidades' no aparece en esta tabla porque no es una sección del
@@ -374,23 +388,29 @@ tengan esa clave; en ese caso, caerían en Desconocidas y no se aplicarían.
 
 
 -------------------------------------------------------------------------------
-# 4. PLANTILLAS
+# 4. Plantillas
 -------------------------------------------------------------------------------
 
-Una **PLANTILLA** es un escenario normalizado que se usa como esqueleto en el flujo
+Una **Plantilla** es un escenario normalizado que se usa como esqueleto en el flujo
 de creación automática (nivel -> tipo -> crear). Vive en
 escenarios/plantillas/*.json.
 
 Plantillas generadas por generar_biblioteca.ps1:
 
     basico           usuarios, grupos, aplicaciones, relaciones
+
     aplicaciones     usuarios, aplicaciones, appRoles, credencialesApp,
                      permisosApi
+
     invitados        invitados
+
     mixto            todas las secciones disponibles para el nivel actual
+
     administracion   usuarios, grupos, administrativeUnits, gruposDinamicos,
                      gruposRoleAssignable (solo P1+)
+
     acceso           accesoCondicional, metodosAuth (solo P1+)
+
     pim              usuarios, pim (solo P2)
 
 Las plantillas no contienen datos: son esqueletos con las secciones vacías.
@@ -401,7 +421,7 @@ vulnerabilidades, las crea desde menu.ps1 [5] tras crear el escenario.
 
 
 -------------------------------------------------------------------------------
-# 5. NORMALIZACIÓN Y VALIDACIÓN
+# 5. Normalización y validación
 -------------------------------------------------------------------------------
 
 El programa no lee el JSON directamente. Lo pasa por
@@ -423,7 +443,7 @@ El normalizador descubre las secciones a partir de las capacidades
 registradas. Si una sección no la reclama ninguna capacidad, va a Desconocidas
 y se preserva en RawDesconocidas.
 
-**CAPACIDADES SIN SECCIÓN:**
+**Capacidades sin sección:**
 Las capacidades con SeccionJson = $null (Vulnerabilidades) no crean entrada
 en Secciones. Si un escenario antiguo tuviera una clave con su Alias, caería
 en Desconocidas y no se procesaría.
@@ -442,7 +462,7 @@ Si hay errores en cualquier fase, creauto.ps1 aborta antes de crear nada.
 
 
 -------------------------------------------------------------------------------
-# 6. MODELO DE SEMILLA Y CONTRASEÑAS
+# 6. Modelo de semilla y contraseñas
 -------------------------------------------------------------------------------
 
 Los escenarios **NO** contienen contraseñas. Cada escenario tiene una semilla local
@@ -466,7 +486,7 @@ En ningún caso la contraseña se guarda en el manifiesto ni en el JSON.
 
 
 -------------------------------------------------------------------------------
-# 7. EJEMPLO COMPLETO (FREE)
+# 7. Ejemplo completo (FREE)
 -------------------------------------------------------------------------------
 
     {
@@ -508,7 +528,7 @@ En ningún caso la contraseña se guarda en el manifiesto ni en el JSON.
 
 
 -------------------------------------------------------------------------------
-# 8. EJEMPLO COMPLETO (P1 + P2)
+# 8. Ejemplo completo versión (P1 + P2)
 -------------------------------------------------------------------------------
 
     {
@@ -585,7 +605,7 @@ En ningún caso la contraseña se guarda en el manifiesto ni en el JSON.
 
 
 -------------------------------------------------------------------------------
-# 9. RESUMEN
+# 9. Resumen
 -------------------------------------------------------------------------------
 
    - Un escenario es un JSON con metadatos y secciones por capacidad.

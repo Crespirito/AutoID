@@ -13,7 +13,7 @@ funciona la limpieza con verificación de objectId.
 
 
 -------------------------------------------------------------------------------
-# 1. ESTRUCTURA DEL MANIFIESTO V2.1
+# 1. Estructura del manifiesto V2.1
 -------------------------------------------------------------------------------
 
 Un manifiesto v2.1 tiene metadatos y dos listas: objetos y vulnerabilidades.
@@ -30,7 +30,7 @@ Un manifiesto v2.1 tiene metadatos y dos listas: objetos y vulnerabilidades.
       "vulnerabilidades": [ ... ]
     }
 
-**CAMPOS DE NIVEL SUPERIOR:**
+**Campos de nivel superior:**
 
     manifestVersion
         Versión del formato. Hoy es "2.1". Permite migraciones futuras.
@@ -65,7 +65,7 @@ Un manifiesto v2.1 tiene metadatos y dos listas: objetos y vulnerabilidades.
 
 
 -------------------------------------------------------------------------------
-# 2. FORMA DE CADA OBJETO
+# 2. Forma de cada objeto
 -------------------------------------------------------------------------------
 
 Cada entrada de objetos tiene campos comunes (que pone el núcleo) y campos
@@ -84,7 +84,7 @@ específicos (que decide la capacidad):
       }
     }
 
-### CAMPOS COMUNES (los pone el núcleo, no la capacidad):
+### Campos comunes (los pone el núcleo, no la capacidad):
 
   **id**
         Identificador único dentro del manifiesto (obj-0001, obj-0002...).
@@ -113,7 +113,7 @@ específicos (que decide la capacidad):
         Datos específicos de la capacidad. El núcleo no los interpreta; solo
         los guarda y los pasa a Revertir.
 
-### CAMPOS ESPECÍFICOS (van dentro de datos, los decide la capacidad):
+### Campos específicos (van dentro de datos, los decide la capacidad):
 
     Cada capacidad decide qué guardar en datos para poder revertir. Regla:
     datos debe contener todo lo que Revertir necesita, ni más ni menos.
@@ -135,7 +135,7 @@ específicos (que decide la capacidad):
 
 
 -------------------------------------------------------------------------------
-# 3. LA SECCIÓN VULNERABILIDADES
+# 3. La sección vulnerabilidades
 -------------------------------------------------------------------------------
 
 Se mantiene separada de objetos por una razón de orden: el cleanup revierte
@@ -162,13 +162,13 @@ Los campos comunes son los mismos que en objetos. La diferencia es que tipo es
 el tipo de vulnerabilidad, y datos son los objetos afectados que devolvió el
 aplicador.
 
-## IMPORTANTE - CAMPO CAPACIDAD:
+## IMPORTANTE - Campo capacidad:
     El campo 'capacidad' es OBLIGATORIO y refleja la capacidad que aplicó la
     vulnerabilidad. Hoy puede ser 'Vulnerabilidades' o 'Pim' (si
     PimEligibleRole se delegó en cap_pim.ps1). El cleanup usará esta
     capacidad para despachar la reversión.
 
-## IMPORTANTE - OBJECTID DEL OBJETO AFECTADO:
+## Importante- OBJECTID del objeto afectado:
     Todos los datos de vulnerabilidad incluyen 'objetoAfectadoObjectId'.
     Es el objectId del SP, grupo, app o usuario sobre el que se aplicó.
     Se usa en Test-LabVulnerabilidadCoincideConManifiesto antes de revertir,
@@ -188,31 +188,37 @@ El detalle de tipos, catálogo y flujo está en docs/vulnerabilidades.md.
 
 
 -------------------------------------------------------------------------------
-# 4. ESTADOS DE CADA OBJETO
+# 4. Estados de cada objeto
 -------------------------------------------------------------------------------
 
     ESTADO          SIGNIFICADO
     --------------  ------------------------------------------------------------
     creado          Creado por el laboratorio en esta ejecución.
+
     reutilizado     Ya existía en el tenant (creado por una ejecución anterior
                     del laboratorio), reutilizado sin crear.
+
     preexistente    Ya existía ANTES del laboratorio (estaba en el snapshot
                     pre-lab). NO se adopta, NO se modifica, NO se revierte.
+
     fallido         Intento de creación fallido; se puede reintentar la
                     reversión.
+
     revertido       Ya revertido.
+
     no-revertido    No se pudo revertir (capacidad no disponible, objectId
                     distinto, etc.).
+
     omitido         Omitido por alguna razón (por ejemplo, preexistente).
 
-### ESTADOS QUE EL CLEANUP INTENTA REVERTIR:
+### Estados que el clean intenta revertir:
 
     Objetos:
         creado, reutilizado, fallido
     Vulnerabilidades:
         aplicada, fallida
 
-### ESTADOS QUE EL CLEANUP IGNORA:
+### Estados que el clean ignora:
 
     Objetos:
         preexistente, revertido, no-revertido, omitido
@@ -237,7 +243,7 @@ es la única fuente de verdad.
 
 
 -------------------------------------------------------------------------------
-# 5. CÓMO SE RELLENA EL MANIFIESTO
+# 5. Cómo se rellena el manifiesto
 -------------------------------------------------------------------------------
 
 ## 5.1. Objetos (escenario)
@@ -295,7 +301,7 @@ Add-LabManifiestoVulnerabilidad requiere -Capacidad. Ya no se hardcodea
 
 
 -------------------------------------------------------------------------------
-# 6. CÓMO SE USA EL MANIFIESTO EN EL CLEANUP
+# 6. Cómo se usa el manifiesto en el clean
 -------------------------------------------------------------------------------
 
 clean_up.ps1 no tiene un switch por tipo. Hace esto:
@@ -355,7 +361,7 @@ clean_up.ps1 no tiene un switch por tipo. Hace esto:
 
 
 -------------------------------------------------------------------------------
-# 7. VERIFICACIÓN DE OBJECTID ANTES DE BORRAR
+# 7. Verificación de objectID antes de borrar
 -------------------------------------------------------------------------------
 
 Antes de llamar a Revertir de cada objeto/vulnerabilidad, el cleanup verifica
@@ -390,7 +396,7 @@ de v1 sin ese dato), no se puede verificar y se confía en el manifiesto.
 
 
 -------------------------------------------------------------------------------
-# 8. MIGRACIÓN DESDE V1 Y V2
+# 8. Migración DESDE V1 Y V2
 -------------------------------------------------------------------------------
 
 ## 8.1. V1 -> V2
@@ -416,10 +422,13 @@ tipo = 'VulnerabilidadAplicada' y capacidad = 'Vulnerabilidades'. En v2.1
 viven en 'vulnerabilidades'.
 
 ### La migración v2 -> v2.1 (ConvertTo-LabManifiestoV21):
+
  1. Separa los objetos con capacidad = 'Vulnerabilidades' (o tipo que
        empiece por 'Vulnerab') del resto.
+
  2. Los convierte a la forma de vulnerabilidad (id, nombre, tipo,
        capacidad, estado, timestamp, datos).
+
  3. Mapea el estado:
            'creado'        -> 'aplicada'
            'preexistente'  -> 'preexistente'
@@ -427,13 +436,14 @@ viven en 'vulnerabilidades'.
            'revertido'     -> 'revertida'
            'no-revertido'  -> 'no-revertida'
            'omitido'       -> 'omitida'
+
  4. Deja el resto de objetos intactos.
  5. Marca manifestVersion = '2.1'.
 
 Es automática al cargar con Get-LabManifiesto. El operador no tiene que hacer
 nada.
 
-## 8.3. Estructura del código de migración
+## 8.3. Estructura del código de migración.
 ---------------------------------------
 La migración la hace lib_manifiesto.ps1:
     - ConvertTo-LabManifiestoV2  (v1 -> v2)
@@ -443,7 +453,7 @@ Se invocan automáticamente desde Get-LabManifiesto.
 
 
 -------------------------------------------------------------------------------
-# 9. GUARDADO Y RENOMBRADO
+# 9. Guardado y renombrado
 -------------------------------------------------------------------------------
 
 ## Guardado:
@@ -464,7 +474,7 @@ Se invocan automáticamente desde Get-LabManifiesto.
 
 
 -------------------------------------------------------------------------------
-# 10. SEGURIDAD
+# 10. Seguridad
 -------------------------------------------------------------------------------
 
  - El manifiesto NO contiene contraseñas. Solo guarda identificadores y
@@ -478,7 +488,7 @@ Se invocan automáticamente desde Get-LabManifiesto.
 
 
 -------------------------------------------------------------------------------
-# 11. EJEMPLO COMPLETO V2.1
+# 11. Ejemplo completo V2.1
 -------------------------------------------------------------------------------
 
     {
@@ -551,7 +561,7 @@ Se invocan automáticamente desde Get-LabManifiesto.
 
 
 -------------------------------------------------------------------------------
-# 12. RESUMEN
+# 12. Resumen
 -------------------------------------------------------------------------------
 
   - El manifiesto registra todo lo creado y modificado para poder revertirlo.

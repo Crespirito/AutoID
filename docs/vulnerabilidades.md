@@ -12,7 +12,7 @@ revierte y cómo encajan en la arquitectura modular.
 
 
 -------------------------------------------------------------------------------
-# 1. QUÉ ES UNA VULNERABILIDAD (Y QUÉ NO)
+# 1. Qué es una vulnerabilidad (y qué no)
 -------------------------------------------------------------------------------
 
 ## ES:
@@ -31,15 +31,19 @@ revierte y cómo encajan en la arquitectura modular.
     ESCENARIO                            VULNERABILIDAD
     -----------------------------------  -----------------------------------
     Crea objetos desde cero.             Modifica objetos existentes.
+
     Vive en $Manifiesto.objetos.         Vive en $Manifiesto.vulnerabilidades.
+
     Se aplica con creauto/creamanual.    Se aplica con menu.ps1 [5].
+
     Orden: primero.                      Orden: después del escenario.
+
     Reversión: LIFO.                     Reversión: PRIMERO, antes que
                                          los objetos.
 
 
 -------------------------------------------------------------------------------
-# 2. TIPOS DISPONIBLES
+# 2. Tipos disponibles
 -------------------------------------------------------------------------------
 
 Cada tipo declara su nivel mínimo, sus dependencias, cómo se valida, cómo se
@@ -103,7 +107,7 @@ aplica, cómo se revierte y qué parámetros pide. La tabla vive en $script:Vuln
 
 
 -------------------------------------------------------------------------------
-# 3. NIVEL EFECTIVO
+# 3. Nivel efectivo
 -------------------------------------------------------------------------------
 
 ### El nivel efectivo es el mínimo entre:
@@ -115,9 +119,12 @@ aplica, cómo se revierte y qué parámetros pide. La tabla vive en $script:Vuln
     CONFIGURADO   TENANT   EFECTIVO   QUÉ SE OFRECE
     ------------  -------  ---------  -------------------------------------
     Free          P2       Free       Solo tipos Free.
+
     P1            P2       P1         Tipos Free + P1 (ninguno hoy).
+
     P2            P1       P1         Solo tipos Free (el tenant no
                                       soporta P2).
+
     P2            P2       P2         Todos.
 
 ### Se aplica en:
@@ -132,7 +139,7 @@ Es conservador a propósito.
 
 
 -------------------------------------------------------------------------------
-# 4. CÓMO SE CREAN: FLUJO [5]
+# 4. Cómo se crean: Flujo [5]
 -------------------------------------------------------------------------------
 
 Desde menu.ps1, opción [5] Crear vulnerabilidad.
@@ -191,7 +198,7 @@ Desde menu.ps1, opción [5] Crear vulnerabilidad.
 
 
 -------------------------------------------------------------------------------
-# 5. CÓMO SE VEN: FLUJO [6]
+# 5. Cómo se ven: flujo [6]
 -------------------------------------------------------------------------------
 
 Desde menu.ps1, opción [6] Ver vulnerabilidades del manifiesto.
@@ -208,7 +215,7 @@ Desde menu.ps1, opción [6] Ver vulnerabilidades del manifiesto.
 
 
 -------------------------------------------------------------------------------
-# 6. CÓMO SE REVIERTEN
+# 6. Cómo se revierten
 -------------------------------------------------------------------------------
 
 Desde clean_up.ps1, que llama a Invoke-LabReversion en lib_creadores.ps1.
@@ -244,19 +251,24 @@ Desde clean_up.ps1, que llama a Invoke-LabReversion en lib_creadores.ps1.
 
 
 -------------------------------------------------------------------------------
-# 7. ESTADOS EN EL MANIFIESTO
+# 7. Estados en el manifiesto
 -------------------------------------------------------------------------------
 
 Estados posibles de una vulnerabilidad (en $Manifiesto.vulnerabilidades):
 
     aplicada        Aplicada y pendiente de revertir.
+
     preexistente    No se aplicó porque el objeto afectado era preexistente
                     (estaba en el snapshot pre-lab). No se toca.
+
     fallida         Intento de aplicación fallido. Se puede reintentar la
                     reversión.
+
     revertida       Ya revertida.
+
     no-revertida    No se pudo revertir (capacidad no disponible, objectId
                     distinto, etc.).
+
     omitida         Omitida por configuración (exclusión).
 
 Estados que el cleanup intenta revertir:
@@ -271,7 +283,7 @@ Las listas viven en lib_manifiesto.ps1:
 
 
 -------------------------------------------------------------------------------
-# 8. SEGURIDAD DE PREEXISTENTES
+# 8. Seguridad de preexistentes
 -------------------------------------------------------------------------------
 
 Antes de aplicar una vulnerabilidad, se consulta el snapshot pre-lab. Si el
@@ -289,7 +301,7 @@ Esto evita modificar objetos que no son del laboratorio.
 
 
 -------------------------------------------------------------------------------
-# 9. OBTENERCLAVES Y PREREVERTIR
+# 9. Obtener claves y prerevertir
 -------------------------------------------------------------------------------
 
 ## 9.1. ObtenerClaves
@@ -323,7 +335,7 @@ Esto evita modificar objetos que no son del laboratorio.
 
 
 -------------------------------------------------------------------------------
-# 10. CATÁLOGO DE VULNERABILIDADES
+# 10. Catálogo de vulnerabilidades
 -------------------------------------------------------------------------------
 
 El catálogo vive en escenarios/vulnerab/*.json. Cada archivo declara una
@@ -354,7 +366,7 @@ no disponibles se muestran deshabilitados con el motivo.
 
 
 -------------------------------------------------------------------------------
-# 11. DATOS POR TIPO EN EL MANIFIESTO
+# 11. Datos por tipo en el manifiesto
 -------------------------------------------------------------------------------
 
 El campo datos de cada vulnerabilidad contiene lo necesario para revertir.
@@ -380,7 +392,7 @@ Datos específicos por tipo:
 
 
 -------------------------------------------------------------------------------
-# 12. AÑADIR UN TIPO NUEVO
+# 12. Añadir un tipo
 -------------------------------------------------------------------------------
 
   1. Añadir una entrada en $script:VulnTipos de cap_vulnerabilidades.ps1 con:
@@ -405,7 +417,7 @@ Datos específicos por tipo:
 
 
 -------------------------------------------------------------------------------
-# 13. QUITAR UN TIPO
+# 13. Quitar un tipo
 -------------------------------------------------------------------------------
 
   - Borrar la entrada de $script:VulnTipos.
@@ -420,7 +432,7 @@ no se ofrece (se muestra deshabilitado con motivo).
 
 
 -------------------------------------------------------------------------------
-# 14. RESUMEN
+# 14. Resumen
 -------------------------------------------------------------------------------
 
   - Vulnerabilidad = modificación maliciosa sobre un objeto existente.

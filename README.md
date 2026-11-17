@@ -20,7 +20,7 @@ Requisitos: PowerShell 5.1+ | Microsoft.Graph | Entra ID (Free, P1 o P2)
 
 
 -------------------------------------------------------------------------------
-# 1. QUÉ ES Y QUÉ NO ES
+# 1. Qué es y qué no es
 -------------------------------------------------------------------------------
 
 ## ES:
@@ -42,7 +42,7 @@ Requisitos: PowerShell 5.1+ | Microsoft.Graph | Entra ID (Free, P1 o P2)
 
 
 -------------------------------------------------------------------------------
-# 2. CARACTERÍSTICAS PRINCIPALES
+# 2. Características principales
 -------------------------------------------------------------------------------
 
  - Arquitectura modular por capacidades. Añadir o quitar una capacidad = añadir o borrar un cap_*.ps1 en la carpeta del nivel. Nada más.
@@ -62,7 +62,7 @@ Requisitos: PowerShell 5.1+ | Microsoft.Graph | Entra ID (Free, P1 o P2)
  - az login como alternativa. Conexión delegada opcional desde [C] -> [3], forzando el flujo de navegador (desactiva WAM) para elegir el usuario.
 
 -------------------------------------------------------------------------------
-# 3. REQUISITOS
+# 3. Requisitos
 -------------------------------------------------------------------------------
 
  - PowerShell 5.1 o superior.
@@ -87,7 +87,7 @@ Requisitos: PowerShell 5.1+ | Microsoft.Graph | Entra ID (Free, P1 o P2)
 
 
 -------------------------------------------------------------------------------
-# 4. INSTALACIÓN RÁPIDA
+# 4. Instalación rápida
 -------------------------------------------------------------------------------
 
    1. Clonar el repositorio.
@@ -111,7 +111,7 @@ Requisitos: PowerShell 5.1+ | Microsoft.Graph | Entra ID (Free, P1 o P2)
 
 
 -------------------------------------------------------------------------------
-# 5. CONEXIÓN A GRAPH
+# 5. Conexión a graph
 -------------------------------------------------------------------------------
 
 ### El programa tiene DOS modos de conexión:
@@ -128,7 +128,7 @@ Requisitos: PowerShell 5.1+ | Microsoft.Graph | Entra ID (Free, P1 o P2)
     - Reconfigurar el certificado desde [C] -> [2].
     - Conectar vía az login desde [C] -> [3].
 
-**SOBRE az login Y WAM:**
+**Sobre az login Y WAM:**
 En Windows, Azure CLI usa el Web Account Manager (WAM) por defecto desde la versión 2.61.0, que tiende a reutilizar la cuenta del sistema operativo. La opción [3] del menú DESACTIVA WAM
 (az config set core.enable_broker_on_windows=false) y limpia la sesión (az account clear) antes de lanzar az login, para que te pida elegir el usuario.
 
@@ -181,7 +181,7 @@ Para el detalle de cada parte, ver docs/.
 
 
 -------------------------------------------------------------------------------
-# 7. USO
+# 7. Uso
 -------------------------------------------------------------------------------
 
 ## Al arrancar menu.ps1:
@@ -189,23 +189,23 @@ Para el detalle de cada parte, ver docs/.
  - Si menu_config.json tiene datos App-Only completos, conecta automáticamente.
  - Si no, avisa y arranca sin sesión. Se configura desde [C].
 
-## OPCIONES DEL MENÚ:
+## Opciones del menú:
 
-### CREACIÓN (ESCENARIOS)
+### Creación (escenarios)
     [1]  Creación automática (nivel -> tipo -> crear)
     [2]  Creación manual (menú generado desde capacidades)
 
-### VULNERABILIDADES
+### Vulnerabilidades
     [5]  Crear vulnerabilidad (aplicar sobre objetos existentes)
     [6]  Ver vulnerabilidades del manifiesto
 
-### LIMPIEZA
+### Limpieza
     [3]  Limpiar entorno (vulnerabilidades primero, luego objetos)
 
-### MANIFIESTO
+### Manifiesto
     [4]  Ver manifiesto
 
-### SESIÓN Y CONFIGURACIÓN
+### Sesión y configuración
     [C]  Gestionar sesión de Graph (App-Only / az login)
     [N]  Cambiar nivel de licencia
     [K]  Ver capacidades disponibles
@@ -213,7 +213,7 @@ Para el detalle de cada parte, ver docs/.
     [R]  Resetear configuración
     [0]  Salir
 
-### FICHEROS GENERADOS EN RUNTIME:
+### Ficheros generados en runtime:
 
 1. menu_config.json                           Configuración local.
 2. manifiesto_lab.json                        Manifiesto v2.1 pendiente.
@@ -224,7 +224,7 @@ Para el detalle de cada parte, ver docs/.
 
 
 -------------------------------------------------------------------------------
-# 8. FLUJO TÍPICO
+# 8. Flujo típico
 -------------------------------------------------------------------------------
 
  1. Crear el certificado y registrar la App en Entra ID (una sola vez).
@@ -240,7 +240,7 @@ Para el detalle de cada parte, ver docs/.
 
 
 -------------------------------------------------------------------------------
-# 9. MODELO DE SEMILLA Y CONTRASEÑAS
+# 9. Modelo de semilla y contraseñas
 -------------------------------------------------------------------------------
 
 Los escenarios **NO** contienen contraseñas. Cada escenario tiene una semilla local
@@ -268,7 +268,7 @@ Si se filtra, se pueden regenerar todas las contraseñas de ese escenario.
 
 
 -------------------------------------------------------------------------------
-# 10. SEGURIDAD Y .GITIGNORE
+# 10. Seguridad y .gitignore
 -------------------------------------------------------------------------------
 
 ## NO SE SUBE A GIT:
@@ -299,7 +299,7 @@ Si se filtra, se pueden regenerar todas las contraseñas de ese escenario.
 
 
 -------------------------------------------------------------------------------
-# 11. CÓMO AÑADIR UNA CAPACIDAD
+# 11. Cçomo añadir una capacidad
 -------------------------------------------------------------------------------
 
  1. Crear lib_caps/<nivel>/cap_<nombre>.ps1.
@@ -320,7 +320,7 @@ caso de Vulnerabilidades. Ver docs/vulnerabilidades.md.
 
 
 -------------------------------------------------------------------------------
-# 12. CÓMO AÑADIR UN TIPO DE VULNERABILIDAD
+# 12. Cómo añadir un tipo de vulnerabilidad
 -------------------------------------------------------------------------------
 
 1. Añadir una entrada en $script:VulnTipos de cap_vulnerabilidades.ps1:
@@ -342,7 +342,7 @@ lib_manifiesto.ps1.
 
 
 -------------------------------------------------------------------------------
-# 13. CÓMO QUITAR UNA CAPACIDAD O UN NIVEL
+# 13. Cómo quitar una capacidad o un nivel
 -------------------------------------------------------------------------------
 **Opciones**
 1. Borrar el cap_*.ps1.
@@ -360,7 +360,7 @@ lib_manifiesto.ps1.
 En los tres casos, el programa sigue funcionando. No hay que tocar el núcleo.
 
 -------------------------------------------------------------------------------
-# 14. DOCUMENTACIÓN
+# 14. Documentación
 -------------------------------------------------------------------------------
 
    **docs/capacidades.md**
@@ -381,7 +381,7 @@ En los tres casos, el programa sigue funcionando. No hay que tocar el núcleo.
 
 
 -------------------------------------------------------------------------------
-# 15. SOLUCIÓN DE PROBLEMAS
+# 15. Solución de problemas
 -------------------------------------------------------------------------------
 
   **"No hay sesión de Graph activa"**
@@ -454,7 +454,7 @@ En los tres casos, el programa sigue funcionando. No hay que tocar el núcleo.
 
 
 -------------------------------------------------------------------------------
-# 16. LIMITACIONES CONOCIDAS
+# 16. Limitaciones conocidas
 -------------------------------------------------------------------------------
 
   - Free vs P1/P2: la detección es por SKU del tenant, no por usuario. Un tenant P1 puede tener usuarios sin P1 asignada; la capacidad se ofrece igualmente y fallará en creación si el usuario no cumple el requisito.
@@ -481,7 +481,7 @@ En los tres casos, el programa sigue funcionando. No hay que tocar el núcleo.
 
 
 -------------------------------------------------------------------------------
-# 17. LICENCIA Y AVISO LEGAL
+# 17. Licencia y aviso legal
 -------------------------------------------------------------------------------
 
 Uso educativo y de laboratorio. Sin garantías.

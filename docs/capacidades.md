@@ -19,7 +19,7 @@ de capacidades.
 
 
 -------------------------------------------------------------------------------
-# 1. ESTRUCTURA DE UNA CAPACIDAD
+# 1. Estructura de una capacidad
 -------------------------------------------------------------------------------
 
 Cada capacidad vive en un archivo cap_*.ps1 dentro de lib_caps/<nivel>/:
@@ -39,7 +39,7 @@ Cada capacidad vive en un archivo cap_*.ps1 dentro de lib_caps/<nivel>/:
             cap_pim.ps1
             cap_metodos_auth.ps1
 
-### LA CARPETA DETERMINA EL NIVEL de la capacidad:
+### La carpeta determina el nivel de la capacidad:
 
     free/   ->  disponible en Entra ID Free.
     p1/     ->  requiere Entra ID P1 (o P2).
@@ -49,52 +49,66 @@ Renombrar p2/ a p2.disabled/ desactiva P2 sin tocar código. El loader ignora cu
 
 
 -------------------------------------------------------------------------------
-# 2. EL CONTRATO DE CAPACIDAD
+# 2. El contrato de capacidad
 -------------------------------------------------------------------------------
 
 Cada cap_*.ps1 declara un hashtable $Capacidad y lo registra con Register-LabCapacidad. El hashtable debe tener los campos obligatorios y puede tener los opcionales.
 
 
-## 2.1. CAMPOS OBLIGATORIOS
+## 2.1. Campos obligatorios
 ------------------------
 
     CAMPO            TIPO            PROPÓSITO
     ---------------  --------------  ------------------------------------------
     Nombre           string          Identificador único. Sin acentos,
                                      PascalCase. Se usa en el manifiesto.
+
     SeccionJson      string/$null    Clave del JSON del escenario que consume.
                                      $null si no consume sección (p. ej.
                                      Vulnerabilidades, que se aplica desde
                                      un flujo dedicado).
+
     DependeDe        array strings   Nombres de capacidades que deben existir
                                      antes. Puede ser @().
+
     PermisosApp      array strings   Permisos de aplicación de Graph.
+
     TestDisponible   scriptblock     param($Contexto) -> {Disponible, Motivo}
                                      Puede incluir campos extra como
                                      TiposDisponibles (Vulnerabilidades).
+
     ValidarDef       scriptblock     param($Def) -> array de errores.
                                      Array vacío = válido.
+
     Describir        scriptblock     param($Def) -> string. Texto resumen.
+
     Crear            scriptblock     param($Def, $Contexto) -> array creados.
+
     Revertir         scriptblock     param($Objeto, $Contexto) -> bool.
                                      Idempotente.
+
     PreguntarUI      scriptblock     param($Contexto) -> definición o $null.
                                      Solo para menú manual.
 
 
-## 2.2. CAMPOS OPCIONALES
+## 2.2. Campos opcionales
 ----------------------
 
     CAMPO            TIPO            PROPÓSITO
     ---------------  --------------  ------------------------------------------
     Descripcion      string          Nombre legible para el menú. Si no
                                      existe, se usa Nombre.
+
     Nivel            string          Fuerza el nivel (Free, P1, P2).
+
                                      Normalmente se hereda de la carpeta.
     Alias            array strings   Nombres alternativos de SeccionJson.
+
     ObtenerClaves    scriptblock     param($Def) -> array de claves.
                                      Usado para snapshot pre-lab por capacidad.
+
     PostCrear        scriptblock     param($Objetos, $Contexto). Tras crear.
+
     PreRevertir      scriptblock     param($Objetos, $Contexto). Antes de
                                      revertir (p. ej. desactivar una
                                      asignación PIM activa).
@@ -109,19 +123,31 @@ Revertir y PreguntarUI. Contiene:
     CLAVE              TIPO            CONTENIDO
     -----------------  --------------  ----------------------------------------
     TenantId           string          Tenant actual.
+
     TenantDomain       string          Dominio por defecto.
+
     Nivel              string          Nivel configurado (Free, P1, P2).
+
     NivelEfectivo      string          min(configurado, real del tenant).
                                      Lo usa Vulnerabilidades para filtrar
                                      tipos disponibles.
+
     Manifiesto         object          Manifiesto en construcción.
+
     ObjetosCreados     hashtable       Por capacidad, objetos creados.
+
     Config             hashtable       Configuración actual.
+
     SnapshotPreLab     hashtable       Identificadores preexistentes.
+
     PasswordsPorUpn    hashtable       Contraseñas derivadas (usuarios).
+
     DerivarPassword    scriptblock     param($upn) -> string.
+
     Semilla            byte[]          Semilla de la sesión.
+
     Log                List[object]    Log compartido.
+
     VulnerabilidadesExcluidas array     Nombres a excluir (solo
                                      Vulnerabilidades).
 
@@ -129,7 +155,7 @@ Revertir y PreguntarUI. Contiene:
 compartir algo, usan $Contexto.ObjetosCreados[$suCapacidad].
 
 
-## 2.4. FORMA DE LOS OBJETOS CREADOS
+## 2.4. Forma de los objetos creados
 ---------------------------------
 
 Cada objeto que Crear devuelve debe tener, como mínimo:
@@ -145,7 +171,7 @@ datos. La capacidad solo se preocupa de tipo, estadoDetalle y sus datos.
 
 
 -------------------------------------------------------------------------------
-# 3. CÓMO SE REGISTRA UNA CAPACIDAD
+# 3. Cómo se registra una capacidad
 -------------------------------------------------------------------------------
 
 Al final de cada cap_*.ps1:
@@ -157,7 +183,7 @@ cada cap_*.ps1 y llama a Register-LabCapacidad. Si un archivo está mal
 formado, se rechaza con warning y no rompe el arranque.
 
 
-VALIDACIONES DEL REGISTRO
+## Validaciones del registro
 -------------------------
 
     1. Campos obligatorios presentes.
@@ -171,15 +197,15 @@ VALIDACIONES DEL REGISTRO
 
 Si algo falla, la capacidad no se registra y se avisa.
 
-CAPACIDADES CON SECCIONJSON = $NULL:
+## Capacidades con seccionJSON = $NULL:
 No crean entrada en $esc.Secciones (ConvertTo-LabEscenarioNormalizado las
 omite). No se procesan en Invoke-LabCreacion. Se aplican desde su flujo
 dedicado (menu.ps1 [5] para Vulnerabilidades). Siguen registrándose en el
-sistema de capacidades y aparecen en [K] Ver capacidades.
+sistema de capacidades y aparecen en [K]: Ver capacidades.
 
 
 -------------------------------------------------------------------------------
-# 4. CÓMO AÑADIR UNA CAPACIDAD NUEVA
+# 4. Cómo añadir una capacidad nueva
 -------------------------------------------------------------------------------
 
    1. Crear el archivo lib_caps/<nivel>/cap_<nombre>.ps1.
@@ -200,7 +226,7 @@ caso de Vulnerabilidades ([5] y [6]). Ver docs/vulnerabilidades.md.
 
 
 -------------------------------------------------------------------------------
-# 5. CÓMO QUITAR UNA CAPACIDAD
+# 5. Cómo quitar una capacidad
 -------------------------------------------------------------------------------
 
 1. BORRAR EL ARCHIVO
@@ -229,7 +255,7 @@ la sección eliminada fallan con "capacidad no registrada" o "carpeta desactivad
 
 
 -------------------------------------------------------------------------------
-# 6. CAPACIDADES DISPONIBLES POR NIVEL
+# 6. Capacidades disponibles por nivel
 -------------------------------------------------------------------------------
 
 FREE
@@ -238,13 +264,21 @@ FREE
     CAPACIDAD            SECCIÓN JSON         DESCRIPCIÓN
     -------------------  -------------------  --------------------------------
     Usuarios             usuarios             Usuarios de Entra ID.
+
     Grupos               grupos               Grupos de seguridad.
+
     Relaciones           relaciones           Membresías usuario -> grupo.
+
     Aplicaciones         aplicaciones         Aplicaciones y SPs.
+
     AppRoles             appRoles             Roles de app y asignaciones.
+
     CredencialesApp      credencialesApp      Client secrets de apps.
+
     PermisosApi          permisosApi          Permisos de API concedidos.
+
     Invitados            invitados            Usuarios B2B (guest).
+
     Vulnerabilidades     (ninguna)            Modificaciones maliciosas
                                               sobre objetos existentes.
                                               Ver docs/vulnerabilidades.md.
@@ -255,10 +289,15 @@ P1
     CAPACIDAD            SECCIÓN JSON         DESCRIPCIÓN
     -------------------  -------------------  --------------------------------
     AdministrativeUnits  administrativeUnits  Unidades administrativas.
+
     GruposDinamicos      gruposDinamicos      Grupos con membresía dinámica.
+
     GruposRoleAssignable gruposRoleAssignable Grupos con IsAssignableToRole.
+
     Licencias            licencias            Asignación de licencias M365.
+
     AccesoCondicional    accesoCondicional    Políticas de Acceso Condicional.
+
     MetodosAuth          metodosAuth          Temporary Access Pass (TAP).
 
 P2
@@ -267,12 +306,14 @@ P2
     CAPACIDAD            SECCIÓN JSON         DESCRIPCIÓN
     -------------------  -------------------  --------------------------------
     Pim                  pim                  Roles elegibles PIM.
+
     Vulnerabilidades     (ninguna)            Tipos P2 disponibles:
+
     (tipo PimEligibleRole)                     PimEligibleRole.
 
 
 -------------------------------------------------------------------------------
-# 7. LICENCIAS Y TestDisponible
+# 7. Licencias y TestDisponible
 -------------------------------------------------------------------------------
 
 Cada capacidad decide en TestDisponible si puede operar en el tenant actual.
@@ -298,7 +339,7 @@ mostrar solo lo disponible. Ver docs/vulnerabilidades.md sección 3.
 
 
 -------------------------------------------------------------------------------
-# 8. EJEMPLO MÍNIMO
+# 8. Ejemplo mínimo
 -------------------------------------------------------------------------------
 
     $Capacidad = @{
@@ -365,7 +406,7 @@ mostrar solo lo disponible. Ver docs/vulnerabilidades.md sección 3.
 
 
 -------------------------------------------------------------------------------
-# 9. RESUMEN
+# 9. Resumen
 -------------------------------------------------------------------------------
 
  - Una capacidad = un archivo cap_*.ps1 en lib_caps/<nivel>/.
