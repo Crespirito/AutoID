@@ -50,13 +50,13 @@ en @().
 
 
 -------------------------------------------------------------------------------
-# 2. Ssecciones por capacidad
+# 2. Secciones por capacidad
 -------------------------------------------------------------------------------
 
 Cada sección corresponde a una capacidad. El nombre de la sección es el
 SeccionJson de la capacidad. Los alias permiten usar nombres alternativos.
 
-## 2.1. USUARIOS  (seccion: usuarios, alias: Usuarios)
+## 2.1. Usuarios  (seccion: usuarios, alias: Usuarios)
 
     {
       "displayName": "Lucia Garcia",
@@ -160,7 +160,7 @@ SeccionJson de la capacidad. Los alias permiten usar nombres alternativos.
         User, Application
 
 
-## 2.6. CredencialesAPPP  (seccion: credencialesApp, alias: credenciales_app, secrets)
+## 2.6. CredencialesAPP  (seccion: credencialesApp, alias: credenciales_app, secrets)
 
     {
       "aplicacion": "Panel de Analisis Comercial",
